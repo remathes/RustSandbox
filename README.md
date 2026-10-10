@@ -127,3 +127,7 @@ plugins/RustSandboxTweaks.cs      Rates, stacks & smelting plugin (installed by 
 - Starting/stopping servers you don't host on this machine isn't possible over RCON; *Stop* sends `quit` and *Restart* uses Rust's `restart` command, so your host must bring the server back.
 - Carbon on Linux has to be launched through Carbon's `environment.sh`; the built-in process manager targets Windows and Oxide-on-Linux best.
 - If the manager restarts, it loses track of server processes it started (they keep running); stop them from the console with `quit` or restart the server manually.
+
+## License
+
+Free to use, learn from and change under the [MIT License](LICENSE). Rust is a trademark of Facepunch Studios; this project is not affiliated with them.
