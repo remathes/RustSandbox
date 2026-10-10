@@ -25,6 +25,9 @@ public sealed record BundledPlugin(string PluginName, string Label, string Downl
     public static readonly BundledPlugin Quests = new("RustSandboxQuests", "Quests plugin", "/api/plugin/quests");
     public static readonly BundledPlugin Help = new("RustSandboxHelp", "Help plugin", "/api/plugin/help");
 
+    /// <summary>One deployable item that places a recycler with a repair bench built in.</summary>
+    public static readonly BundledPlugin Recycler = new("RustSandboxRecycler", "Repair Recycler plugin", "/api/plugin/recycler");
+
     public string FileName => PluginName + ".cs";
 
     public string ReadSource()

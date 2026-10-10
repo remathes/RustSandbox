@@ -27,6 +27,7 @@
     <EmbeddedResource Include="..\..\plugins\RustSandboxEvents.cs" LogicalName="RustSandboxEvents.cs" />
     <EmbeddedResource Include="..\..\plugins\RustSandboxQuests.cs" LogicalName="RustSandboxQuests.cs" />
     <EmbeddedResource Include="..\..\plugins\RustSandboxHelp.cs" LogicalName="RustSandboxHelp.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxRecycler.cs" LogicalName="RustSandboxRecycler.cs" />
   </ItemGroup>
 
 </Project>

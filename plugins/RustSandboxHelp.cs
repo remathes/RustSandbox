@@ -80,6 +80,17 @@ namespace Oxide.Plugins
             },
             new Section
             {
+                Title = "Repair Recycler",
+                Plugin = "RustSandboxRecycler",
+                Intro = "A recycler with a repair bench built in, as one item. Place it like a repair bench and it becomes a recycler. Open it to recycle as normal, or put a damaged item in the first input slot, switch the recycler off and press Repair on the panel beside it. The owner can rotate it or pick it up from that panel.",
+                Commands =
+                {
+                    C("/recycler", "What it is and what it costs"),
+                    C("/recycler craft", "Make one from the listed materials"),
+                },
+            },
+            new Section
+            {
                 Title = "Skills",
                 Plugin = "RustSandboxSkills",
                 Intro = "You earn XP in nine skills just by playing: mining, woodcutting, combat, gardening, electrician, survival, mechanic, fishing and scrapper. Each level gives points to spend on perks like more ore, faster crafting or less damage. Playing solo earns bonus XP.",

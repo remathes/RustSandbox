@@ -171,7 +171,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok", time = DateTime.
 app.MapGet("/api/plugin", () =>
     Results.File(Encoding.UTF8.GetBytes(ProcessManager.ReadPluginSource()), "text/plain", ProcessManager.PluginFileName));
 
-foreach (var bundled in new[] { BundledPlugin.EventHud, BundledPlugin.Skills, BundledPlugin.Daily, BundledPlugin.Events, BundledPlugin.Quests, BundledPlugin.Help })
+foreach (var bundled in new[] { BundledPlugin.EventHud, BundledPlugin.Skills, BundledPlugin.Daily, BundledPlugin.Events, BundledPlugin.Quests, BundledPlugin.Help, BundledPlugin.Recycler })
     app.MapGet(bundled.DownloadPath, () => Results.File(Encoding.UTF8.GetBytes(bundled.ReadSource()), "text/plain", bundled.FileName));
 
 app.MapGet("/api/servers/{id:int}/plugin-config", async (int id, ServerService servers, HttpRequest req, IConfiguration cfg) =>
