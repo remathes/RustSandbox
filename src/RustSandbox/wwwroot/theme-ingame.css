@@ -1,0 +1,175 @@
+/* =====================================================================
+   Rust Sandbox — "Rust in-game" theme
+   Styled after the game's own menus: flat see-through dark panels, square corners, condensed uppercase
+   headings, olive-green action buttons, brick-red danger buttons and a blue selection highlight.
+   Only applies with <html data-theme="ingame">. No animation, so it's light on the GPU.
+   ===================================================================== */
+html[data-theme="ingame"] {
+  --steel-950: #121211;
+  --steel-900: #181816;
+  --steel-850: #1f1e1c;
+  --steel-800: #252422;
+  --steel-750: #2c2b29;
+  --steel-700: #363532;
+  --steel-600: #474540;
+  --steel-500: #6b6760;
+  --steel-400: #8f8a82;
+  --bone: #e6ddd2;
+  --bone-dim: #b1a99d;
+  --rust: #6b8636;       /* the game's green button */
+  --rust-hi: #87a845;
+  --rust-lo: #48592a;
+  --patina: #8db446;     /* health-bar green */
+  --hazard: #d8a23a;
+  --signal: #c4432e;     /* the game's red button */
+  --sky: #3f7fb8;        /* selected-slot blue */
+  --sel: 63, 127, 184;
+
+  --font-ui: "Roboto Condensed", "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-head: "Roboto Condensed", "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+
+  --r-sm: 0;
+  --r-md: 0;
+  --panel-bg: rgba(30, 29, 27, .86);
+  --panel-head-bg: rgba(255, 255, 255, .055);
+  --focus: 0 0 0 2px rgba(var(--sel), .9);
+}
+
+/* ---- the page: a dark, blurred scene like the main menu ---- */
+html[data-theme="ingame"] body {
+  background: #161614;
+  font-size: 15.5px;
+  letter-spacing: .005em;
+}
+html[data-theme="ingame"] body::after {
+  content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none; will-change: transform;
+  background:
+    radial-gradient(ellipse 85% 75% at 50% 40%, transparent 35%, rgba(0,0,0,.65)),
+    radial-gradient(ellipse 60% 45% at 75% 30%, rgba(120,128,110,.16), transparent 70%),
+    radial-gradient(ellipse 55% 40% at 20% 75%, rgba(140,110,80,.12), transparent 70%),
+    linear-gradient(180deg, #23241f, #171714 60%, #10100e);
+}
+/* the user's own picture (Preferences), blurred like the game's menu background */
+html[data-theme="ingame"][data-photo] body::before {
+  content: ""; position: fixed; inset: -40px; z-index: -1; pointer-events: none; will-change: transform;
+  background:
+    radial-gradient(ellipse 85% 75% at 50% 45%, transparent 35%, rgba(0,0,0,.55)),
+    var(--page-photo) center / cover no-repeat;
+  filter: blur(10px) brightness(.55) saturate(.8);
+}
+
+/* ---- type ---- */
+html[data-theme="ingame"] h1,
+html[data-theme="ingame"] h2,
+html[data-theme="ingame"] h3,
+html[data-theme="ingame"] h4 { font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+html[data-theme="ingame"] h1 { font-size: 30px; }
+html[data-theme="ingame"] a:not([class]) { color: #8fbbe3; }
+html[data-theme="ingame"] ::selection { background: rgba(var(--sel), .7); }
+
+/* ---- panels: flat, see-through, no borders ---- */
+html[data-theme="ingame"] .panel,
+html[data-theme="ingame"] .fleet-card,
+html[data-theme="ingame"] .callout {
+  background: var(--panel-bg);
+  border: 0;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+}
+html[data-theme="ingame"] .panel.inset { background: rgba(0,0,0,.3); }
+html[data-theme="ingame"] .panel-head {
+  background: var(--panel-head-bg);
+  border-bottom: 0;
+  padding: 11px 16px;
+}
+html[data-theme="ingame"] .panel-head h2,
+html[data-theme="ingame"] .panel-head h3 { font-size: 16px; letter-spacing: .05em; }
+html[data-theme="ingame"] .panel-head .hint { color: var(--steel-400); }
+html[data-theme="ingame"] .fleet-card { border-left: 4px solid var(--fc, var(--rust)); }
+html[data-theme="ingame"] .fleet-card:hover { background: rgba(44, 43, 40, .9); }
+html[data-theme="ingame"] .callout { border-left: 4px solid var(--sky); }
+html[data-theme="ingame"] .callout.warn { border-left-color: var(--hazard); }
+html[data-theme="ingame"] .callout.bad { border-left-color: var(--signal); }
+html[data-theme="ingame"] .callout.good { border-left-color: var(--patina); }
+
+/* inner tiles look like inventory slots */
+html[data-theme="ingame"] .duel > div { background: rgba(255,255,255,.06); border: 0; }
+
+/* ---- server header and stat strip ---- */
+html[data-theme="ingame"] .plate { background: rgba(20, 20, 18, .82); border-bottom: 0; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+html[data-theme="ingame"] .plate::after { display: none; }
+html[data-theme="ingame"] .gauges { background: none; border: 0; gap: 6px; }
+html[data-theme="ingame"] .gauge { background: var(--panel-bg); border-right: 0; }
+html[data-theme="ingame"] .gauge .lbl { text-transform: uppercase; font-size: 12px; letter-spacing: .06em; }
+
+/* ---- buttons: grey, green for actions, red for danger, all uppercase ---- */
+html[data-theme="ingame"] .btn {
+  background: rgba(255,255,255,.09);
+  border: 0;
+  color: var(--bone);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+html[data-theme="ingame"] .btn:hover { background: rgba(255,255,255,.16); }
+html[data-theme="ingame"] .btn.primary { background: #6b8636; color: #e6f2cf; }
+html[data-theme="ingame"] .btn.primary:hover { background: #7c9a40; }
+html[data-theme="ingame"] .btn.danger { background: #a3392a; color: #fbd9d2; }
+html[data-theme="ingame"] .btn.danger:hover { background: #b84432; }
+html[data-theme="ingame"] .btn.ghost { background: transparent; color: var(--bone-dim); }
+html[data-theme="ingame"] .btn.ghost:hover { background: rgba(255,255,255,.09); color: var(--bone); }
+
+/* ---- segmented choices and tabs: blue when selected ---- */
+html[data-theme="ingame"] .seg { border: 0; gap: 2px; }
+html[data-theme="ingame"] .seg button { background: rgba(255,255,255,.08); border: 0; font: 700 13px var(--font-ui); text-transform: uppercase; letter-spacing: .04em; }
+html[data-theme="ingame"] .seg button.on { background: rgba(var(--sel), .75); color: #fff; }
+html[data-theme="ingame"] .tabs { border-bottom: 0; gap: 2px; }
+html[data-theme="ingame"] .tabs button {
+  background: rgba(30, 29, 27, .7); border-bottom: 0; margin-bottom: 0;
+  font: 700 14px var(--font-ui); text-transform: uppercase; letter-spacing: .05em;
+}
+html[data-theme="ingame"] .tabs button:hover { background: rgba(255,255,255,.1); }
+html[data-theme="ingame"] .tabs button.on { background: rgba(var(--sel), .75); color: #fff; }
+
+/* ---- forms ---- */
+html[data-theme="ingame"] .input,
+html[data-theme="ingame"] .field input:not([type=checkbox]):not([type=range]),
+html[data-theme="ingame"] .field select,
+html[data-theme="ingame"] .field textarea,
+html[data-theme="ingame"] select.input,
+html[data-theme="ingame"] textarea.input { background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.08); }
+html[data-theme="ingame"] .input:focus,
+html[data-theme="ingame"] .field input:focus,
+html[data-theme="ingame"] .field select:focus,
+html[data-theme="ingame"] .field textarea:focus { border-color: rgba(var(--sel), .9); box-shadow: none; }
+html[data-theme="ingame"] .field > span { text-transform: uppercase; font-size: 12.5px; letter-spacing: .05em; }
+
+/* ---- tables, badges, bars ---- */
+html[data-theme="ingame"] .table th { text-transform: uppercase; letter-spacing: .06em; font-weight: 700; font-size: 12px; border-bottom-color: rgba(255,255,255,.08); }
+html[data-theme="ingame"] .table td { border-bottom-color: rgba(255,255,255,.05); }
+html[data-theme="ingame"] .table tbody tr:hover { background: rgba(255,255,255,.04); }
+html[data-theme="ingame"] .badge { border-radius: 0; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+html[data-theme="ingame"] .badge.rust { background: rgba(107,134,54,.3); color: #b8d67a; }
+html[data-theme="ingame"] .bar-track { background: rgba(0,0,0,.4); height: 10px; }
+html[data-theme="ingame"] .bar-fill { background: linear-gradient(180deg, #9cc451, #6f9336); }
+
+/* ---- sidebar: like the main menu, big uppercase words ---- */
+html[data-theme="ingame"] .rail {
+  background: rgba(14, 14, 13, .82);
+  border-right: 0;
+}
+html[data-theme="ingame"] .brand-name { text-transform: uppercase; font-weight: 700; letter-spacing: .04em; }
+html[data-theme="ingame"] .switcher-btn { background: rgba(255,255,255,.07); border: 0; }
+html[data-theme="ingame"] .switcher-menu { background: #222120; border: 0; }
+html[data-theme="ingame"] .nav-group { text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+html[data-theme="ingame"] .nav-link {
+  text-transform: uppercase; font-weight: 700; letter-spacing: .04em; font-size: 15px;
+  color: rgba(230, 221, 210, .72);
+}
+html[data-theme="ingame"] .nav-link:hover { background: rgba(255,255,255,.08); color: #fff; }
+html[data-theme="ingame"] .nav-link.active { background: rgba(var(--sel), .6); color: #fff; }
+html[data-theme="ingame"] .nav-link.active::before { display: none; }
+html[data-theme="ingame"] .rail-foot { border-top-color: rgba(255,255,255,.08); }
+
+/* ---- map ---- */
+html[data-theme="ingame"] .map-wrap { border: 0; box-shadow: 0 0 0 4px rgba(0,0,0,.45); }
+html[data-theme="ingame"] .lamp.online { background: var(--patina); box-shadow: 0 0 10px rgba(141,180,70,.6); }

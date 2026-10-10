@@ -1,0 +1,183 @@
+@page "/"
+@implements IDisposable
+@inject ServerService Servers
+@inject ServerConnectionManager Conn
+@inject ProcessManager Processes
+@inject LiveWorldStore World
+@inject LiveEvents Live
+@inject ServerContext Ctx
+@inject UpdateService Updates
+@inject IJSRuntime JS
+
+<PageTitle>All servers · Rust Sandbox</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <div class="grow">
+            <h1>Your servers</h1>
+            <p>@Summary</p>
+        </div>
+        <a class="btn primary" href="servers/new"><Icon Name="plus" /> Add a server</a>
+    </div>
+
+    @if (_servers is null)
+    {
+        <div class="empty">Loading…</div>
+    }
+    else
+    {
+        <div class="fleet">
+            @foreach (var s in _servers)
+            {
+                var rt = Conn.Get(s.Id);
+                var proc = Processes.Get(s.Id);
+                var history = rt.Metrics.Last(120);
+                <a class="fleet-card" href="s/@s.Id" style="--fc:@s.Color">
+                    <div class="row" style="flex-wrap:nowrap">
+                        <span class="lamp @Lamp(rt)"></span>
+                        <div style="min-width:0;flex:1">
+                            <h2 class="ellipsis">@s.Name</h2>
+                            <div class="host ellipsis">
+                                @(s.IsDemo ? "Simulated demo server" : $"{s.Settings.RconHost}:{s.Settings.Port}") · @s.Settings.MapDisplayName
+                            </div>
+                        </div>
+                        @if (Updates.Get(s.Id).AnyUpdate)
+                        {
+                            <span class="badge warn">Update</span>
+                        }
+                        @if (proc.Activity is not null)
+                        {
+                            <span class="badge warn">@proc.Activity</span>
+                        }
+                        else if (rt.IsOnline)
+                        {
+                            <span class="badge good">Online</span>
+                        }
+                        else if (rt.State == ConnectionState.Error)
+                        {
+                            <span class="badge bad">Can't connect</span>
+                        }
+                        else
+                        {
+                            <span class="badge">Offline</span>
+                        }
+                    </div>
+                    <div class="fleet-body">
+                    <div class="fleet-stats">
+                    @if (rt.IsOnline && rt.Info is { } info)
+                    {
+                        <div class="figures">
+                            <div><b>@info.Players<span class="muted" style="font-size:14px">/@info.MaxPlayers</span></b><span>players</span></div>
+                            <div><b>@info.Framerate.ToString("0")</b><span>FPS</span></div>
+                            <div><b>@Fmt.Num(info.EntityCount)</b><span>entities</span></div>
+                            <div><b>@Fmt.Duration(TimeSpan.FromSeconds(info.Uptime))</b><span>uptime</span></div>
+                        </div>
+                        <div style="margin-top:10px">
+                            <Sparkline Values="history.Select(m => (double)m.Players).ToList()" Height="34" Color="@s.Color" Min="0" />
+                        </div>
+                    }
+                    else if (rt.State == ConnectionState.Error && rt.LastError is not null)
+                    {
+                        <p class="muted" style="margin:12px 0 0;font-size:13px">@rt.LastError</p>
+                    }
+                    @if (World.LastTelemetryUtc(s.Id) is { } t)
+                    {
+                        <div class="muted" style="font-size:12.5px;margin-top:8px">Telemetry @Fmt.Ago(t)</div>
+                    }
+                    </div>
+                    @MapThumb(s)
+                    </div>
+                </a>
+            }
+            <a class="fleet-add" href="servers/new">
+                <Icon Name="plus" />
+                <span>Add a server</span>
+                <small class="muted">Connect over RCON, or let this machine run it</small>
+            </a>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ServerInstance>? _servers;
+    private Timer? _timer;
+
+    private string Summary
+    {
+        get
+        {
+            if (_servers is null || _servers.Count == 0) return "Add your first server to start managing it.";
+            var online = _servers.Count(s => Conn.Get(s.Id).IsOnline);
+            var players = _servers.Sum(s => Conn.Get(s.Id).Info?.Players ?? 0);
+            return $"{online} of {_servers.Count} online · {players} player{(players == 1 ? "" : "s")} across all servers";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ctx.Set(null);
+        _servers = await Servers.GetAllAsync();
+        Live.ServersChanged += OnServersChanged;
+        _timer = new Timer(_ => InvokeAsync(StateHasChanged), null, 5000, 5000);
+    }
+
+    // Seeds already drawn into a tile's canvas, so a refresh doesn't redraw them.
+    private readonly Dictionary<int, string> _drawn = new();
+    private readonly Dictionary<int, ElementReference> _canvases = new();
+
+    /// <summary>The rendered map's thumbnail, the server's map image, or a generated preview for procedural maps.</summary>
+    private RenderFragment MapThumb(ServerInstance s) => __builder =>
+    {
+        var rendered = MapImages.FindRendered(s);
+        if (rendered is not null)
+        {
+            <div class="fleet-map" title="@s.Settings.MapDisplayName"><img src="api/servers/@s.Id/map-thumb?v=@rendered.LastWriteTimeUtc.Ticks.ToString("x")" alt="" loading="lazy" /></div>
+        }
+        else if (!string.IsNullOrWhiteSpace(s.Settings.MapImageUrl))
+        {
+            <div class="fleet-map" title="@s.Settings.MapDisplayName"><img src="@s.Settings.MapImageUrl" alt="" loading="lazy" /></div>
+        }
+        else if (s.Settings.MapMode == MapMode.Procedural)
+        {
+            <div class="fleet-map" title="Preview of @s.Settings.MapDisplayName (approximate until the server renders its map)">
+                <canvas width="232" height="232" @ref="_canvases[s.Id]"></canvas>
+            </div>
+        }
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_servers is null) return;
+        foreach (var s in _servers)
+        {
+            if (!_canvases.TryGetValue(s.Id, out var canvas) || MapImages.FindRendered(s) is not null || !string.IsNullOrWhiteSpace(s.Settings.MapImageUrl)) continue;
+            var key = $"{s.Settings.Seed}:{s.Settings.WorldSize}";
+            if (_drawn.TryGetValue(s.Id, out var done) && done == key) continue;
+            _drawn[s.Id] = key;
+            try { await JS.InvokeVoidAsync("RSM.mapgen.render", canvas, s.Settings.Seed, s.Settings.WorldSize, new { resolution = 232, labels = false, monuments = false }); }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { /* prerendering: no JS yet */ _drawn.Remove(s.Id); }
+        }
+    }
+
+    private static string Lamp(ServerRuntime rt) => rt.State switch
+    {
+        ConnectionState.Online => "online",
+        ConnectionState.Connecting => "connecting",
+        ConnectionState.Error => "error",
+        _ => "",
+    };
+
+    private void OnServersChanged() => _ = InvokeAsync(async () =>
+    {
+        _servers = await Servers.GetAllAsync();
+        _drawn.Clear();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        Live.ServersChanged -= OnServersChanged;
+    }
+}

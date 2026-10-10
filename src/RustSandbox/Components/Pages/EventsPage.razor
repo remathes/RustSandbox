@@ -1,0 +1,327 @@
+@page "/s/{Id:int}/events"
+@inherits ServerPageBase
+@inject EventsService EventsApi
+@inject IDbContextFactory<AppDbContext> DbFactory
+@using System.Globalization
+
+<PageTitle>@(Server?.Name ?? "Server") · Events</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Events</h1>
+                <p>Run server events players can take part in. Players type <code>/hunt</code> to see their current clue.</p>
+            </div>
+            @if (_status is not null)
+            {
+                <span class="badge good">Plugin v@(_status.Version)</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="RefreshAsync" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (!Runtime.IsOnline)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The server is offline. Events run inside the game, so start the server to run one.</div>
+        }
+        else if (_status is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The Events plugin didn't answer. Install it from <a href="s/@Id/telemetry">Telemetry → Events</a>, then refresh.</div>
+        }
+
+        <div class="grid g-2">
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Treasure hunt</h2>
+                    <span class="spacer"></span>
+                    @if (_status?.Hunt is { } h)
+                    {
+                        <span class="badge rust">Running · @Minutes(h.MinutesLeft) left</span>
+                    }
+                </div>
+                <div class="panel-body stack" style="gap:14px">
+                    @if (_status?.Hunt is { } hunt)
+                    {
+                        <div>
+                            <div class="muted" style="font-size:13px;margin-bottom:6px">Route (players only see riddles)</div>
+                            <ol style="margin:0;padding-left:20px;line-height:1.7">
+                                <li>Start: <b>@hunt.Start</b> <span class="muted">@hunt.StartGrid</span></li>
+                                @for (var i = 0; i < hunt.Stages.Count; i++)
+                                {
+                                    var s = hunt.Stages[i];
+                                    <li>Clue @(i + 1): <b>@s.Monument</b> <span class="muted">@s.Grid</span>@(i == hunt.Stages.Count - 1 ? " · Golden Statue" + (hunt.StatueSpawned ? " (out)" : "") : "")</li>
+                                }
+                            </ol>
+                        </div>
+                        <div>
+                            <div class="muted" style="font-size:13px;margin-bottom:6px">Hunters</div>
+                            @if (hunt.Hunters.Count == 0)
+                            {
+                                <p class="muted" style="margin:0">Nobody has picked up a detector yet.</p>
+                            }
+                            else
+                            {
+                                <table class="table">
+                                    <tbody>
+                                        @foreach (var p in hunt.Hunters)
+                                        {
+                                            <tr>
+                                                <td>@if (p.Online) {<span class="online-dot" title="Online"></span>}@p.Name</td>
+                                                <td class="r">@(p.Stage >= hunt.Stages.Count ? "Looking for the statue" : $"Clue {p.Stage + 1} of {hunt.Stages.Count}")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+                        <div><button class="btn danger" @onclick="StopAsync" disabled="@_busy">Stop the hunt</button></div>
+                    }
+                    else
+                    {
+                        <p class="muted" style="margin:0">Players go to the Airfield to pick up a Treasure Compass, then follow riddles to hidden spots at random monuments. Each clue's monument shows on their compass, and the Treasure Compass beeps faster, shows the direction and, up close, the distance. The first to open the Golden Statue crate wins epic loot.</p>
+                        <div class="field">
+                            <span>Clues</span>
+                            <div class="seg">
+                                @foreach (var c in new[] { 3, 4, 6 })
+                                {
+                                    <button class="@(_clues == c ? "on" : "")" @onclick="() => _clues = c">@c</button>
+                                }
+                            </div>
+                        </div>
+                        <div class="field">
+                            <span>Time limit</span>
+                            <div class="seg">
+                                @foreach (var m in new[] { 30, 45, 60, 90 })
+                                {
+                                    <button class="@(_minutes == m ? "on" : "")" @onclick="() => _minutes = m">@m min</button>
+                                }
+                            </div>
+                        </div>
+                        <div><button class="btn primary" @onclick="StartAsync" disabled="@(_busy || _status is null)"><Icon Name="bolt" /> Start a treasure hunt</button></div>
+                    }
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Train heist</h2>
+                    <span class="spacer"></span>
+                    @if (_status?.Heist is { } hs)
+                    {
+                        <span class="badge rust">@(hs.Won ? "Won" : "Running") · @Minutes(hs.MinutesLeft) left</span>
+                    }
+                </div>
+                <div class="panel-body stack" style="gap:14px">
+                    @if (_status?.Heist is { } heist)
+                    {
+                        <div class="duel" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+                            <div><span class="muted">Train is near</span><b>@heist.Grid</b></div>
+                            <div><span class="muted">Guards left</span><b>@heist.Guards</b></div>
+                            <div><span class="muted">Crate</span><b>@(heist.Won ? "Cracked" : heist.Hacking ? "Being hacked" : "Locked")</b></div>
+                        </div>
+                        @if (heist.Hacker is { Length: > 0 })
+                        {
+                            <p class="muted" style="margin:0">Hacked by <b>@heist.Hacker</b>.</p>
+                        }
+                        <div><button class="btn danger" @onclick="StopHeistAsync" disabled="@_busy">Stop the heist</button></div>
+                    }
+                    else
+                    {
+                        <p class="muted" style="margin:0">A self-driving loot train with scientist guards runs the rail loop. Players board it, clear the guards and hack the locked crate on the last wagon before time runs out. It's announced in chat with the train's grid square.</p>
+                        <div class="field">
+                            <span>Scientists on the train</span>
+                            <div class="seg">
+                                @foreach (var g in new[] { 4, 6, 8, 12 })
+                                {
+                                    <button class="@(_guards == g ? "on" : "")" @onclick="() => _guards = g">@g</button>
+                                }
+                            </div>
+                        </div>
+                        <div class="field">
+                            <span>Time limit</span>
+                            <div class="seg">
+                                @foreach (var m in new[] { 15, 30, 45, 60 })
+                                {
+                                    <button class="@(_heistMinutes == m ? "on" : "")" @onclick="() => _heistMinutes = m">@m min</button>
+                                }
+                            </div>
+                        </div>
+                        <div><button class="btn primary" @onclick="StartHeistAsync" disabled="@(_busy || _status is null)"><Icon Name="bolt" /> Start a train heist</button></div>
+                    }
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head"><h2>Every week</h2><span class="spacer"></span><a class="btn sm" href="s/@Id/schedules">All schedules</a></div>
+                <div class="panel-body stack" style="gap:14px">
+                    <p class="muted" style="margin:0">Adds a weekly schedule that starts an event by itself, using the settings chosen above. It runs from Rust Sandbox, so it needs to be running.</p>
+                    <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+                        <label class="field">
+                            <span>Event</span>
+                            <select class="input" @bind="_weekEvent">
+                                <option value="hunt">Treasure hunt</option>
+                                <option value="heist">Train heist</option>
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>Day</span>
+                            <select class="input" @bind="_weekDay">
+                                @foreach (var d in new[] { DayOfWeek.Saturday, DayOfWeek.Sunday, DayOfWeek.Friday, DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday })
+                                {
+                                    <option value="@d">@d</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="field">
+                            <span>At</span>
+                            <input class="input" type="time" @bind="_weekTime" />
+                        </label>
+                    </div>
+                    <div><button class="btn primary" @onclick="AddWeeklyAsync"><Icon Name="schedule" /> @(_weekEvent == "heist" ? $"Add weekly train heist ({_guards} guards, {_heistMinutes} min)" : $"Add weekly hunt ({_clues} clues, {_minutes} min)")</button></div>
+                    @if (_tasks.Count > 0)
+                    {
+                        <table class="table">
+                            <tbody>
+                                @foreach (var t in _tasks)
+                                {
+                                    <tr>
+                                        <td>@t.Name<br /><small class="muted">@SchedulerService.Describe(t)@(t.Enabled ? "" : " · paused")</small></td>
+                                        <td class="r"><button class="btn sm danger" @onclick="() => DeleteTaskAsync(t)">Delete</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    <p class="help" style="margin:0">Prizes, riddle settings, heavy scientists, wagons, crate hack time and train speed are in <code>@(Server.Settings.Framework == ModFramework.Carbon ? "carbon/configs" : "oxide/config")/@(EventsService.Plugin.PluginName).json</code>.</p>
+                </div>
+            </section>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _busy, _loaded;
+    private EventsStatus? _status;
+    private int _clues = 4, _minutes = 60, _guards = 6, _heistMinutes = 30;
+    private string _weekEvent = "hunt";
+    private DayOfWeek _weekDay = DayOfWeek.Saturday;
+    private TimeOnly _weekTime = new(20, 0);
+    private List<ScheduledTask> _tasks = new();
+
+    protected override TimeSpan RefreshInterval => TimeSpan.FromSeconds(10);
+
+    protected override async Task OnServerChangedAsync()
+    {
+        await RefreshAsync();
+        await LoadTasksAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        try
+        {
+            _status = Runtime.IsOnline ? await EventsApi.StatusAsync(Id) : null;
+            _loaded = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await EventsApi.StartHuntAsync(Id, _clues, _minutes);
+            if (reply is null) Toasts.Error("The server is offline.");
+            else if (reply.Contains("started", StringComparison.OrdinalIgnoreCase)) Toasts.Success(reply.Trim());
+            else Toasts.Error(reply.Trim());
+        }
+        finally { _busy = false; }
+        await RefreshAsync();
+    }
+
+    private async Task StopAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await EventsApi.StopHuntAsync(Id);
+            if (reply is null) Toasts.Error("The server is offline.");
+            else Toasts.Success(reply.Trim());
+        }
+        finally { _busy = false; }
+        await RefreshAsync();
+    }
+
+    private async Task StartHeistAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await EventsApi.StartHeistAsync(Id, _guards, _heistMinutes);
+            if (reply is null) Toasts.Error("The server is offline.");
+            else if (reply.Contains("started", StringComparison.OrdinalIgnoreCase)) Toasts.Success(reply.Trim());
+            else Toasts.Error(reply.Trim());
+        }
+        finally { _busy = false; }
+        await RefreshAsync();
+    }
+
+    private async Task StopHeistAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await EventsApi.StopHeistAsync(Id);
+            if (reply is null) Toasts.Error("The server is offline.");
+            else Toasts.Success(reply.Trim());
+        }
+        finally { _busy = false; }
+        await RefreshAsync();
+    }
+
+    private async Task LoadTasksAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tasks = await db.Schedules.AsNoTracking()
+            .Where(t => t.ServerId == Id && t.Action == ScheduleAction.Command && (t.Payload.StartsWith("sandboxevents.hunt.start") || t.Payload.StartsWith("sandboxevents.heist.start")))
+            .OrderBy(t => t.Id).ToListAsync();
+    }
+
+    private async Task AddWeeklyAsync()
+    {
+        var t = new ScheduledTask
+        {
+            ServerId = Id,
+            Name = _weekEvent == "heist" ? $"Train heist ({_guards} guards, {_heistMinutes} min)" : $"Treasure hunt ({_clues} clues, {_minutes} min)",
+            Kind = ScheduleKind.Weekly,
+            Action = ScheduleAction.Command,
+            DayOfWeek = _weekDay,
+            TimeOfDayMinutes = _weekTime.Hour * 60 + _weekTime.Minute,
+            Payload = _weekEvent == "heist" ? EventsService.HeistCommand(_guards, _heistMinutes) : EventsService.HuntCommand(_clues, _minutes),
+        };
+        t.NextRunUtc = SchedulerService.ComputeNext(t, DateTime.UtcNow);
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.Schedules.Add(t);
+            await db.SaveChangesAsync();
+        }
+        Toasts.Success($"Added: {SchedulerService.Describe(t)}.");
+        await LoadTasksAsync();
+    }
+
+    private async Task DeleteTaskAsync(ScheduledTask t)
+    {
+        await using (var db = await DbFactory.CreateDbContextAsync())
+            await db.Schedules.Where(x => x.Id == t.Id).ExecuteDeleteAsync();
+        await LoadTasksAsync();
+    }
+
+    private static string Minutes(double m) => m >= 60 ? $"{(int)(m / 60)}h {(int)(m % 60)}m" : $"{Math.Max(1, (int)Math.Ceiling(m))}m";
+}

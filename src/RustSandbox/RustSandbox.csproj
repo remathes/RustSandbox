@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>RustSandbox</RootNamespace>
+    <AssemblyName>RustSandbox</AssemblyName>
+    <Version>1.0.0</Version>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+  </ItemGroup>
+
+  <!-- The Oxide/Carbon telemetry plugin ships inside the app so it can be
+       downloaded from the UI or installed into a locally managed server. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\plugins\RustSandboxTelemetry.cs" LogicalName="RustSandboxTelemetry.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxTweaks.cs" LogicalName="RustSandboxTweaks.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxEventHud.cs" LogicalName="RustSandboxEventHud.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxSkills.cs" LogicalName="RustSandboxSkills.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxDaily.cs" LogicalName="RustSandboxDaily.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxEvents.cs" LogicalName="RustSandboxEvents.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxQuests.cs" LogicalName="RustSandboxQuests.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxHelp.cs" LogicalName="RustSandboxHelp.cs" />
+  </ItemGroup>
+
+</Project>

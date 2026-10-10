@@ -1,0 +1,245 @@
+@implements IDisposable
+@inject ServerService Servers
+@inject ServerConnectionManager Conn
+@inject ProcessManager Processes
+@inject LiveEvents Live
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+@if (_server is not null)
+{
+    var rt = Conn.Get(_server.Id);
+    var proc = Processes.Get(_server.Id);
+    var info = rt.Info;
+    <header class="plate">
+        <div class="plate-id">
+            <span class="lamp @Lamp(rt)" title="@StatusText(rt, proc)"></span>
+            <div style="min-width:0">
+                <h1 class="ellipsis">@_server.Name</h1>
+                <div class="sub ellipsis">
+                    @StatusText(rt, proc)
+                    @if (_server.IsDemo) { <span class="badge rust" style="margin-left:6px">Demo data</span> }
+                </div>
+            </div>
+        </div>
+
+        @if (rt.IsOnline && info is not null)
+        {
+            <div class="plate-stats">
+                <div class="plate-stat"><b>@info.Players<span class="muted" style="font-size:14px">/@info.MaxPlayers</span></b><span>@(info.Queued > 0 ? $"players · {info.Queued} queued" : "players")</span></div>
+                <div class="plate-stat"><b class="@FpsClass(info.Framerate)">@info.Framerate.ToString("0")</b><span>server FPS</span></div>
+                <div class="plate-stat"><b>@Fmt.Num(info.EntityCount)</b><span>entities</span></div>
+                <div class="plate-stat"><b>@Fmt.Duration(TimeSpan.FromSeconds(info.Uptime))</b><span>uptime</span></div>
+                <div class="plate-stat"><b>@Fmt.Bytes(info.Memory * 1024d * 1024d)</b><span>memory</span></div>
+            </div>
+        }
+
+        <div class="plate-actions">
+            @if (!_server.IsDemo && _server.Settings.SteamConnectUrl is { } joinUrl)
+            {
+                <a class="btn primary" href="@joinUrl" title="Opens Rust through Steam and connects to @_server.Settings.ConnectAddress"><Icon Name="play" /> Join game</a>
+                <button class="btn icon ghost" title="Copy the F1 connect command" @onclick="CopyConnectAsync"><Icon Name="copy" /></button>
+            }
+            else if (!_server.IsDemo)
+            {
+                <a class="btn ghost" href="s/@_server.Id/settings?tab=network" title="Set the public address players connect to">Set join address</a>
+            }
+            @if (CanStart(proc))
+            {
+                <button class="btn primary" @onclick="StartAsync" disabled="@_busy"><Icon Name="play" /> Start</button>
+            }
+            @if (rt.IsOnline || proc.IsRunning)
+            {
+                <button class="btn" @onclick="SaveAsync" disabled="@(_busy || !rt.IsOnline)" title="Save the world now"><Icon Name="save" /> Save</button>
+                <button class="btn" @onclick="() => _restartOpen = true" disabled="@_busy"><Icon Name="restart" /> Restart</button>
+                <button class="btn danger" @onclick="() => _stopOpen = true" disabled="@_busy"><Icon Name="stop" /> Stop</button>
+            }
+            else if (!_server.IsDemo && !_server.Settings.ManageProcess)
+            {
+                <button class="btn" @onclick="ReconnectAsync" disabled="@_busy"><Icon Name="restart" /> Reconnect</button>
+            }
+        </div>
+    </header>
+
+    @if (proc.CountdownEndUtc is { } end)
+    {
+        <div class="hazard" role="alert">
+            <span class="hazard-text">@proc.Activity — <span class="countdown">@Remaining(end)</span></span>
+            <button class="btn sm" @onclick="Cancel">Cancel</button>
+        </div>
+    }
+    else if (proc.Activity is not null)
+    {
+        <div class="hazard" role="status"><span class="hazard-text">@proc.Activity</span></div>
+    }
+
+    <ConfirmDialog @bind-Visible="_stopOpen" Title="Stop the server?" ConfirmText="Save and stop" Danger="true" OnConfirm="StopAsync">
+        <p>The world is saved first, then the server shuts down. Players are disconnected.</p>
+        @if (!_server.Settings.ManageProcess)
+        {
+            <p class="warn">This server isn't run by this machine, so it can only be started again from wherever it's hosted.</p>
+        }
+    </ConfirmDialog>
+
+    <ConfirmDialog @bind-Visible="_restartOpen" Title="Restart the server" ConfirmText="Start countdown" OnConfirm="RestartAsync">
+        <p>Players see countdown warnings in chat before the restart.</p>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr;margin-top:10px">
+            <label class="field">
+                <span>Warning time</span>
+                <select @bind="_warnMinutes">
+                    <option value="0">Restart now</option>
+                    <option value="1">1 minute</option>
+                    <option value="5">5 minutes</option>
+                    <option value="10">10 minutes</option>
+                    <option value="15">15 minutes</option>
+                    <option value="30">30 minutes</option>
+                </select>
+            </label>
+            <label class="field">
+                <span>Reason shown to players</span>
+                <input @bind="_reason" />
+            </label>
+        </div>
+    </ConfirmDialog>
+}
+
+@code {
+    [Parameter] public int ServerId { get; set; }
+
+    private ServerInstance? _server;
+    private bool _busy, _stopOpen, _restartOpen;
+    private int _warnMinutes = 5;
+    private string _reason = "Restart";
+    private Timer? _timer;
+    private int _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ServerId)
+        {
+            _loaded = ServerId;
+            _server = await Servers.GetAsync(ServerId);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Live.StatusChanged += OnStatus;
+        Live.ServersChanged += OnServers;
+        // ticks the countdown display
+        _timer = new Timer(_ =>
+        {
+            if (Processes.Get(ServerId).CountdownEndUtc is not null) _ = InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+    }
+
+    private void OnStatus(int id)
+    {
+        if (id == ServerId) _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnServers() => _ = InvokeAsync(async () =>
+    {
+        _server = await Servers.GetAsync(ServerId);
+        StateHasChanged();
+    });
+
+    private static string Lamp(ServerRuntime rt) => rt.State switch
+    {
+        ConnectionState.Online => "online",
+        ConnectionState.Connecting => "connecting",
+        ConnectionState.Error => "error",
+        _ => "",
+    };
+
+    private string StatusText(ServerRuntime rt, ProcessState proc)
+    {
+        if (rt.IsOnline) return $"Online · {_server!.Settings.MapDisplayName}";
+        if (proc.IsRunning) return "Process running · waiting for RCON (the world can take a few minutes to load)";
+        if (rt.State == ConnectionState.Connecting) return "Connecting…";
+        if (rt.State == ConnectionState.Error) return rt.LastError ?? "Can't connect";
+        return _server!.Settings.ManageProcess ? "Stopped" : "Offline";
+    }
+
+    private static string FpsClass(double fps) => fps < 15 ? "bad" : fps < 30 ? "warn" : "";
+
+    private bool CanStart(ProcessState proc) => _server is { IsDemo: false } && _server.Settings.ManageProcess && !proc.IsRunning;
+
+    private static string Remaining(DateTime end)
+    {
+        var t = end - DateTime.UtcNow;
+        if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+        return $"{(int)t.TotalMinutes}:{t.Seconds:00}";
+    }
+
+    private async Task Run(Func<Task<string?>> action, string success)
+    {
+        _busy = true;
+        try { Toasts.Result(await action(), success); }
+        finally { _busy = false; }
+    }
+
+    private Task StartAsync() => Run(() => Processes.StartAsync(_server!), "Server starting — the world takes a few minutes to load.");
+    private Task StopAsync() => Run(() => Processes.StopAsync(_server!), "Server stopped.");
+
+    private Task RestartAsync()
+    {
+        // Countdown runs in the background; the hazard bar shows progress.
+        var server = _server!;
+        var minutes = _warnMinutes;
+        var reason = string.IsNullOrWhiteSpace(_reason) ? "Restart" : _reason;
+        _ = Task.Run(async () =>
+        {
+            var err = await Processes.RestartAsync(server, minutes, reason);
+            if (err is not null) await InvokeAsync(() => Toasts.Error(err));
+        });
+        Toasts.Show(minutes == 0 ? "Restarting now." : $"Restart in {minutes} minute(s). Players have been warned.");
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            var r = await Conn.QueryAsync(ServerId, "server.save", TimeSpan.FromSeconds(60));
+            if (r is null) Toasts.Error("Not connected.");
+            else Toasts.Success("World saved.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ReconnectAsync()
+    {
+        _busy = true;
+        try
+        {
+            var ok = await Conn.EnsureConnectedAsync(_server!, force: true);
+            if (ok) Toasts.Success("Connected.");
+            else Toasts.Error(Conn.Get(ServerId).LastError ?? "Couldn't connect.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task CopyConnectAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("RSM.copy", $"client.connect {_server!.Settings.ConnectAddress}");
+            Toasts.Success("Copied — paste it into Rust's F1 console.");
+        }
+        catch (JSException) { Toasts.Error("Couldn't access the clipboard."); }
+    }
+
+    private void Cancel()
+    {
+        if (Processes.CancelCountdown(ServerId)) Toasts.Show("Countdown cancelled.");
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        Live.StatusChanged -= OnStatus;
+        Live.ServersChanged -= OnServers;
+    }
+}

@@ -1,0 +1,77 @@
+@* Kill feed: who killed whom, with what, from how far *@
+@if (Items.Count == 0)
+{
+    <div class="empty">
+        <h3>No kills yet</h3>
+        <p>Deaths show up here as soon as the telemetry plugin reports them.</p>
+    </div>
+}
+else
+{
+    <ul class="feed">
+        @foreach (var k in Items)
+        {
+            <li class="@(DateTime.UtcNow - k.Timestamp < TimeSpan.FromSeconds(8) ? "fresh" : "")" @key="k.Id == 0 ? (object)k : k.Id">
+                <div class="who">
+                    @Actor(k.KillerType, k.KillerId, Killer(k))
+                    <span class="muted"> killed </span>
+                    @Actor(k.VictimType, k.VictimId, Victim(k))
+                </div>
+                <div class="how">
+                    @How(k)
+                    @if (k.IsHeadshot)
+                    {
+                        <span class="hs"> · headshot</span>
+                    }
+                    @if (WorldSize > 0 && (k.VictimX != 0 || k.VictimZ != 0))
+                    {
+                        <span> · @Fmt.Grid(k.VictimX, k.VictimZ, WorldSize)</span>
+                    }
+                </div>
+                <time class="when" datetime="@k.Timestamp.ToString("o")">@Fmt.Ago(k.Timestamp)</time>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<KillEvent> Items { get; set; } = Array.Empty<KillEvent>();
+    [Parameter] public int WorldSize { get; set; }
+    [Parameter] public EventCallback<string> OnPlayer { get; set; }
+
+    private static string Killer(KillEvent k) => k.KillerType switch
+    {
+        ActorType.Environment => string.IsNullOrEmpty(k.DamageType) ? "The world" : k.DamageType,
+        ActorType.Self => "Themselves",
+        _ => string.IsNullOrEmpty(k.KillerName) ? StatsService.CauseLabel(k) : k.KillerName,
+    };
+
+    private static string Victim(KillEvent k) => string.IsNullOrEmpty(k.VictimName) ? StatsService.VictimLabel(k) : k.VictimName;
+
+    private static string How(KillEvent k)
+    {
+        if (k.KillerType == ActorType.Self) return "suicide";
+        if (k.KillerType == ActorType.Environment) return $"died of {(string.IsNullOrEmpty(k.DamageType) ? "the environment" : k.DamageType.ToLowerInvariant())}";
+        var parts = new List<string>();
+        if (!string.IsNullOrEmpty(k.Weapon)) parts.Add(k.Weapon);
+        if (k.Distance > 0) parts.Add($"{k.Distance:0} m");
+        if (!string.IsNullOrEmpty(k.BodyPart) && !k.IsHeadshot) parts.Add(k.BodyPart.ToLowerInvariant());
+        return parts.Count > 0 ? string.Join(" · ", parts) : StatsService.CauseLabel(k);
+    }
+
+    private RenderFragment Actor(ActorType type, string id, string name) => __builder =>
+    {
+        if (type == ActorType.Player && !string.IsNullOrEmpty(id) && OnPlayer.HasDelegate)
+        {
+            <a href="javascript:void(0)" @onclick="() => OnPlayer.InvokeAsync(id)"><b>@name</b></a>
+        }
+        else if (type == ActorType.Player)
+        {
+            <b>@name</b>
+        }
+        else
+        {
+            <span class="dim">@name</span>
+        }
+    };
+}

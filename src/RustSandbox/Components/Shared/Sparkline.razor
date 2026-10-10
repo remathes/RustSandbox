@@ -1,0 +1,30 @@
+@* Tiny inline trend line *@
+@if (Values.Count >= 2)
+{
+    var max = Max ?? Math.Max(Values.Max(), 1e-9);
+    var min = Min ?? Values.Min();
+    if (Math.Abs(max - min) < 1e-9) { max = min + 1; }
+    var step = (double)Width / (Values.Count - 1);
+    var pts = string.Join(" ", Values.Select((v, i) => $"{(i * step).ToString("0.#", CultureInfo.InvariantCulture)},{(Height - 2 - (v - min) / (max - min) * (Height - 4)).ToString("0.#", CultureInfo.InvariantCulture)}"));
+    <svg width="100%" height="@Height" viewBox="0 0 @Width @Height" preserveAspectRatio="none" aria-hidden="true">
+        @if (Fill)
+        {
+            <polygon points="0,@Height @pts @Width,@Height" fill="@Color" fill-opacity="0.14" />
+        }
+        <polyline points="@pts" fill="none" stroke="@Color" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+    </svg>
+}
+else
+{
+    <svg width="100%" height="@Height" aria-hidden="true"><line x1="0" x2="100%" y1="@(Height / 2)" y2="@(Height / 2)" stroke="var(--steel-700)" stroke-dasharray="3 4" /></svg>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<double> Values { get; set; } = Array.Empty<double>();
+    [Parameter] public int Width { get; set; } = 160;
+    [Parameter] public int Height { get; set; } = 30;
+    [Parameter] public string Color { get; set; } = "var(--rust-hi)";
+    [Parameter] public bool Fill { get; set; } = true;
+    [Parameter] public double? Max { get; set; }
+    [Parameter] public double? Min { get; set; }
+}

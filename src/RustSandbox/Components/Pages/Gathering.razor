@@ -1,0 +1,181 @@
+@page "/s/{Id:int}/gathering"
+@inherits ServerPageBase
+@inject StatsService Stats
+
+<PageTitle>@(Server?.Name ?? "Server") · Gathering</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Gathering</h1>
+                <p>Wood, ore, berries, mushrooms, hemp, crops, animal parts and fish gathered by players, as reported by the telemetry plugin.</p>
+            </div>
+            <div class="row">
+                <RangePicker Value="@_range" ValueChanged="SetRangeAsync" />
+            </div>
+        </div>
+
+        @if (Player is not null)
+        {
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-body">
+                    <PlayerStatsPanel @key="Player" ServerId="Id" SteamId="@Player" FromUtc="From" WorldSize="Server.Settings.WorldSize" OnClose="ClosePlayer" />
+                </div>
+            </section>
+        }
+
+        @if (_stats is null)
+        {
+            <div class="empty">Crunching numbers…</div>
+        }
+        else if (_stats.Total == 0)
+        {
+            <div class="panel">
+                <div class="empty">
+                    <h3>Nothing gathered in this period</h3>
+                    <p>Gathering is reported by telemetry plugin 1.5.0 or newer. Reinstall the plugin from the Telemetry page if the server runs an older one.</p>
+                    <a class="btn primary" href="s/@Id/telemetry">Open telemetry</a>
+                </div>
+            </div>
+        }
+        else
+        {
+            var s = _stats;
+            <div class="gauges">
+                <div class="gauge"><div class="val">@Short(s.Total)</div><div class="lbl">resources gathered</div><div class="foot">@s.Gatherers players · @s.Times.ToString("N0") hits &amp; pickups</div></div>
+                @foreach (var c in s.Categories.OrderByDescending(c => c.Value).Take(5))
+                {
+                    <div class="gauge"><div class="val">@Short((long)c.Value)</div><div class="lbl">@c.Name.ToLowerInvariant()</div><div class="foot">@((c.Value / s.Total).ToString("P0")) of everything</div></div>
+                }
+            </div>
+
+            <div class="grid g-main mt">
+                <section class="panel">
+                    <div class="panel-head"><h2>Top gatherers</h2><span class="spacer"></span><span class="hint">click a player for details</span></div>
+                    <div class="panel-body flush table-wrap">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Player</th>
+                                    @foreach (var col in Columns())
+                                    {
+                                        <th class="sortable r" @onclick="() => Sort(col)">@col @Arrow(col)</th>
+                                    }
+                                    <th class="sortable r" @onclick='() => Sort("Total")'>Total @Arrow("Total")</th>
+                                    <th>Favourite</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var rank = 0; }
+                                @foreach (var r in Leaderboard().Take(_showAll ? 500 : 15))
+                                {
+                                    rank++;
+                                    <tr class="clickable" @onclick="() => OpenPlayer(r.SteamId)">
+                                        <td class="rank">@rank</td>
+                                        <td class="ellipsis" style="max-width:180px"><b>@r.Name</b></td>
+                                        @foreach (var col in Columns())
+                                        {
+                                            var v = r.Get(col);
+                                            <td class="r num @(v == 0 ? "dim" : "")">@Short(v)</td>
+                                        }
+                                        <td class="r num"><b>@Short(r.Total)</b></td>
+                                        <td class="ellipsis dim" style="max-width:150px">@r.FavouriteItem</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (s.Leaderboard.Count > 15)
+                        {
+                            <div style="padding:10px 16px"><button class="btn sm ghost" @onclick="() => _showAll = !_showAll">@(_showAll ? "Show top 15" : $"Show all {s.Leaderboard.Count}")</button></div>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Most gathered</h2><span class="spacer"></span><span class="hint">amount · times</span></div>
+                    <div class="panel-body"><BarList Items="s.TopItems" Take="15" Color="var(--hazard)" ShowDetail="true" /></div>
+                </section>
+            </div>
+
+            <div class="grid g-3 mt">
+                <section class="panel">
+                    <div class="panel-head"><h3>By resource type</h3></div>
+                    <div class="panel-body"><BarList Items="s.Categories" Take="12" Color="var(--patina)" /></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>Where it comes from</h3></div>
+                    <div class="panel-body"><BarList Items="s.Sources" Take="8" Color="var(--sky)" /></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>Gathered per day</h3></div>
+                    <div class="panel-body"><ColumnChart Items="s.Timeline" Height="140" LabelEvery="@Math.Max(1, s.Timeline.Count / 6)" /></div>
+                </section>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "player")] public string? Player { get; set; }
+
+    private string _range = "7d";
+    private GatherStats? _stats;
+    private string _sort = "Total";
+    private bool _desc = true, _showAll;
+    private DateTime _loaded;
+
+    private DateTime? From => StatRanges.From(_range, Server?.LastWipeUtc);
+
+    protected override async Task OnServerChangedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _stats = await Stats.GetGatherStatsAsync(Id, From);
+        _loaded = DateTime.UtcNow;
+    }
+
+    private async Task SetRangeAsync(string range)
+    {
+        _range = range;
+        _stats = null;
+        await LoadAsync();
+    }
+
+    protected override async Task OnLiveRefreshAsync()
+    {
+        if (DateTime.UtcNow - _loaded > TimeSpan.FromSeconds(30)) await LoadAsync();
+        StateHasChanged();
+    }
+
+    /// <summary>The resource types with anything gathered, most first (up to six columns).</summary>
+    private IEnumerable<string> Columns() =>
+        (_stats?.Categories ?? new()).OrderByDescending(c => c.Value).Take(6).Select(c => c.Name)
+            .OrderBy(c => Array.IndexOf(GatherCatalog.Categories, c));
+
+    private IEnumerable<GathererRow> Leaderboard()
+    {
+        var rows = _stats?.Leaderboard ?? new();
+        Func<GathererRow, long> key = _sort == "Total" ? r => r.Total : r => r.Get(_sort);
+        return _desc ? rows.OrderByDescending(key).ThenByDescending(r => r.Total) : rows.OrderBy(key).ThenByDescending(r => r.Total);
+    }
+
+    private void Sort(string key)
+    {
+        if (_sort == key) _desc = !_desc;
+        else { _sort = key; _desc = true; }
+    }
+
+    private string Arrow(string key) => _sort != key ? "" : _desc ? "↓" : "↑";
+
+    private static string Short(long v) =>
+        v >= 1_000_000 ? (v / 1_000_000.0).ToString("0.#") + "M" :
+        v >= 100_000 ? (v / 1_000.0).ToString("0") + "k" :
+        v.ToString("N0");
+
+    private void OpenPlayer(string steamId) => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", steamId));
+
+    private void ClosePlayer() => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", (string?)null));
+}

@@ -1,0 +1,212 @@
+@* Dashboard control panel: power, restart, wipe and updates in one place. *@
+@implements IDisposable
+@inject ServerConnectionManager Conn
+@inject ProcessManager Processes
+@inject UpdateService Updates
+@inject LiveEvents Live
+@inject ToastService Toasts
+
+@{
+    var rt = Conn.Get(Server.Id);
+    var proc = Processes.Get(Server.Id);
+    var up = Updates.Get(Server.Id);
+    var local = Server.Settings.ManageProcess && !Server.IsDemo;
+}
+<section class="panel">
+    <div class="panel-head">
+        <h2>Server controls</h2>
+        <span class="spacer"></span>
+        @if (up.AnyUpdate)
+        {
+            <span class="badge warn">Update available</span>
+        }
+    </div>
+    <div class="panel-body stack" style="gap:14px">
+        <div class="row">
+            @if (local && !proc.IsRunning)
+            {
+                <button class="btn primary" @onclick="StartAsync" disabled="@_busy"><Icon Name="play" /> Start</button>
+            }
+            else
+            {
+                <button class="btn" @onclick="() => _restartOpen = true" disabled="@(_busy || (!rt.IsOnline && !proc.IsRunning))"><Icon Name="restart" /> Restart</button>
+                <button class="btn danger" @onclick="() => _stopOpen = true" disabled="@(_busy || (!rt.IsOnline && !proc.IsRunning))"><Icon Name="stop" /> Stop</button>
+            }
+            @if (local)
+            {
+                <button class="btn danger" @onclick="() => OpenWipe(false)" disabled="@_busy"><Icon Name="wipe" /> Map wipe</button>
+                <button class="btn danger" @onclick="() => OpenWipe(true)" disabled="@_busy">Full wipe</button>
+            }
+        </div>
+
+        @if (Server.IsDemo)
+        {
+            <p class="muted" style="margin:0;font-size:13.5px">Demo servers are simulated — power, wipe and update buttons apply to servers the manager runs.</p>
+        }
+        else if (!local)
+        {
+            <p class="muted" style="margin:0;font-size:13.5px">Hosted elsewhere: Stop sends <code>quit</code> and Restart uses Rust's restart command, so your host brings it back. Wipes and updates happen at your host.</p>
+        }
+
+        <dl class="kv">
+            <dt>Map</dt>
+            <dd>@Server.Settings.MapDisplayName</dd>
+            <dt>Last wipe</dt>
+            <dd>@(Server.LastWipeUtc is { } w ? $"{Fmt.Local(w, "MMM d, HH:mm")} ({Fmt.Ago(w)})" : "Unknown")</dd>
+            <dt>Rust build</dt>
+            <dd>
+                @(up.InstalledBuild ?? "—")
+                @if (up.RustUpdate)
+                {
+                    <span class="badge warn" style="margin-left:6px">@up.LatestBuild available</span>
+                }
+                else if (up.LatestBuild is not null && up.InstalledBuild is not null)
+                {
+                    <span class="badge good" style="margin-left:6px">up to date</span>
+                }
+            </dd>
+            @if (Server.Settings.Framework != ModFramework.Vanilla)
+            {
+                <dt>@Server.Settings.Framework</dt>
+                <dd>
+                    @(up.FrameworkInstalled ?? "—")
+                    @if (up.FrameworkUpdate)
+                    {
+                        <span class="badge warn" style="margin-left:6px">@up.FrameworkLatest available</span>
+                    }
+                    else if (up.FrameworkLatest is not null && up.FrameworkInstalled is not null)
+                    {
+                        <span class="badge good" style="margin-left:6px">up to date</span>
+                    }
+                </dd>
+            }
+            <dt>Checked</dt>
+            <dd>
+                @(up.CheckedUtc is { } c ? Fmt.Ago(c) : "Not yet")
+                @if (up.Error is not null)
+                {
+                    <span class="warn"> · @up.Error</span>
+                }
+            </dd>
+        </dl>
+
+        <div class="row">
+            <button class="btn sm ghost" @onclick="CheckAsync" disabled="@_busy">Check for updates</button>
+            @if (local)
+            {
+                <button class="btn sm @(up.AnyUpdate ? "primary" : "")" @onclick="() => _updateOpen = true" disabled="@_busy"><Icon Name="download" /> @(up.AnyUpdate ? "Update now" : "Update / verify")</button>
+            }
+        </div>
+    </div>
+</section>
+
+<ConfirmDialog @bind-Visible="_stopOpen" Title="Stop the server?" ConfirmText="Save and stop" Danger="true" OnConfirm="StopAsync">
+    <p>The world is saved, then the server shuts down.</p>
+</ConfirmDialog>
+
+<ConfirmDialog @bind-Visible="_restartOpen" Title="Restart the server" ConfirmText="Start countdown" OnConfirm="RestartAsync">
+    <p>Players get countdown warnings in chat.</p>
+    <label class="field" style="margin-top:10px"><span>Warning time (minutes)</span><input class="input" type="number" min="0" max="60" @bind="_warn" /></label>
+</ConfirmDialog>
+
+<ConfirmDialog @bind-Visible="_wipeOpen" Title="@(_wipeFull ? "Full wipe (map + blueprints)" : "Map wipe")" ConfirmText="Start wipe" Danger="true" RequireText="@Server.Name" OnConfirm="WipeAsync">
+    <p>Countdown, stop, wipe, start on a fresh map. Old save files go to a wipe-backups folder.</p>
+    <div class="form-grid" style="margin-top:10px">
+        <label class="field"><span>Warning time (minutes)</span><input class="input" type="number" min="0" max="60" @bind="_warn" /></label>
+        <label class="check" style="align-self:end"><input type="checkbox" @bind="_newSeed" /><span><b>New random seed</b></span></label>
+    </div>
+</ConfirmDialog>
+
+<ConfirmDialog @bind-Visible="_updateOpen" Title="Update the server" ConfirmText="Update now" OnConfirm="UpdateAsync">
+    <p>@UpdateDescription</p>
+    <label class="field" style="margin-top:10px"><span>Warning time (minutes)</span><input class="input" type="number" min="0" max="60" @bind="_warn" /></label>
+</ConfirmDialog>
+
+@code {
+    [Parameter, EditorRequired] public ServerInstance Server { get; set; } = default!;
+
+    private string UpdateDescription => Server.Settings.Framework == ModFramework.Vanilla
+        ? "Players are warned, the server is saved and stopped, Rust is updated through SteamCMD, and the server starts again."
+        : $"Players are warned, the server is saved and stopped, Rust is updated through SteamCMD, {Server.Settings.Framework} is reinstalled to match, and the server starts again.";
+
+    private bool _busy, _stopOpen, _restartOpen, _wipeOpen, _wipeFull, _newSeed = true, _updateOpen;
+    private int _warn = 5;
+
+    protected override void OnInitialized() => Live.StatusChanged += OnStatus;
+
+    private void OnStatus(int id)
+    {
+        if (id == Server.Id) _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenWipe(bool full)
+    {
+        _wipeFull = full;
+        _wipeOpen = true;
+    }
+
+    private async Task StartAsync()
+    {
+        _busy = true;
+        try { Toasts.Result(await Processes.StartAsync(Server), "Server starting — the world takes a few minutes to load."); }
+        finally { _busy = false; }
+    }
+
+    private async Task StopAsync()
+    {
+        _busy = true;
+        try { Toasts.Result(await Processes.StopAsync(Server), "Server stopped."); }
+        finally { _busy = false; }
+    }
+
+    // Long jobs run in the background; progress shows in the header bar and the console.
+    private void Background(Func<Task<string?>> job, string success)
+    {
+        _ = Task.Run(async () =>
+        {
+            string? err;
+            try { err = await job(); }
+            catch (Exception ex) { err = ex.Message; }
+            await InvokeAsync(() => Toasts.Result(err, success));
+        });
+    }
+
+    private Task RestartAsync()
+    {
+        var s = Server; var warn = _warn;
+        Background(() => Processes.RestartAsync(s, warn, "Restart"), "Server restarted.");
+        Toasts.Show(warn > 0 ? $"Restart in {warn} minute(s)." : "Restarting now.");
+        return Task.CompletedTask;
+    }
+
+    private Task WipeAsync()
+    {
+        var s = Server; var (full, seed, warn) = (_wipeFull, _newSeed, _warn);
+        Background(() => Processes.WipeAsync(s, full, seed, warn), "Wipe complete — starting on a fresh map.");
+        Toasts.Show(warn > 0 ? $"Wipe countdown started ({warn} min)." : "Wiping now.");
+        return Task.CompletedTask;
+    }
+
+    private Task UpdateAsync()
+    {
+        var s = Server; var warn = _warn;
+        Background(() => Updates.UpdateNowAsync(s, warn), "Update finished.");
+        Toasts.Show("Update started — follow along in the console.");
+        return Task.CompletedTask;
+    }
+
+    private async Task CheckAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Updates.CheckAsync(Server);
+            var up = Updates.Get(Server.Id);
+            if (up.Error is not null) Toasts.Warn(up.Error);
+            else Toasts.Show(up.AnyUpdate ? "Updates are available." : "Everything is up to date.");
+        }
+        finally { _busy = false; }
+    }
+
+    public void Dispose() => Live.StatusChanged -= OnStatus;
+}

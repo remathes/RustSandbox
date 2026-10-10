@@ -1,0 +1,601 @@
+@page "/s/{Id:int}/rates"
+@inherits ServerPageBase
+@inject TweaksService Tweaks
+@using System.Text.Json
+
+<PageTitle>@(Server?.Name ?? "Server") · Rates &amp; stacks</PageTitle>
+
+@if (Server is not null && _t is not null)
+{
+    var blocker = TweaksService.CannotApplyReason(Server);
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Rates &amp; stacks</h1>
+                <p>Gather rates, stack sizes and furnace speed. Applied live by the manager's own plugin — no restart needed.</p>
+            </div>
+            <span class="badge @StatusClass">@StatusText</span>
+            @if (Dirty)
+            {
+                <button class="btn ghost" @onclick="Revert" disabled="@_busy">Discard</button>
+            }
+            <button class="btn primary" @onclick="ApplyAsync" disabled="@(_busy || blocker is not null)"><Icon Name="save" /> @(_busy ? "Applying…" : Dirty ? "Save & apply" : "Apply")</button>
+        </div>
+
+        @if (blocker is not null)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">@blocker</div>
+        }
+
+        <section class="panel" style="margin-bottom:var(--gap)">
+            <div class="panel-body">
+                <label class="check">
+                    <input type="checkbox" checked="@_t.Enabled" @onchange="e => { _t.Enabled = e.Value is true; }" />
+                    <span><b>Use custom rates on this server</b><small>Turn off to go back to vanilla everything (stack sizes and cooking are restored when you apply).</small></span>
+                </label>
+                <label class="check" style="margin-top:12px">
+                    <input type="checkbox" checked="@_t.Sorting" @onchange="e => { _t.Sorting = e.Value is true; }" />
+                    <span><b>Inventory sorting</b><small>Adds <em>Sort box</em>, <em>Quick stack</em>, <em>Take all</em> and <em>Sort mine</em> buttons when players open boxes, barrels, crates, stashes, the tool cupboard and backpacks, and a <code>/sort</code> chat command for their own inventory (hotbar and clothes are left alone). Works whether or not custom rates are on.</small></span>
+                </label>
+                <label class="check" style="margin-top:12px">
+                    <input type="checkbox" checked="@_t.RadiationTint" @onchange="e => { _t.RadiationTint = e.Value is true; }" />
+                    <span><b>Radiation screen tint</b><small>The screen edges glow green while radiation gets through a player's clothing, and pulse red once radiation poisoning starts to hurt. Players can turn it off for themselves with <code>/eventhud tint</code>. @(BundledPlugin.EventHud.IsInstalled(Server) ? "" : "Needs the Event HUD plugin (Telemetry page).")</small></span>
+                </label>
+                <label class="check" style="margin-top:12px">
+                    <input type="checkbox" checked="@_t.RemoveTool" @onchange="e => { _t.RemoveTool = e.Value is true; }" />
+                    <span><b>Remove tool</b><small>Players type <code>/remove</code> and hit their own building pieces or deployables with a Hammer to remove them. Only works where they're authorised on the tool cupboard (or, with no cupboard, on things they or their team placed). Storage must be emptied first. Deployables come back as items; building pieces refund
+                        <input class="input" style="width:64px;display:inline-block;height:26px;padding:0 6px" type="number" min="0" max="100" step="5" value="@Math.Round(_t.RemoveRefund * 100)" @onchange="SetRemoveRefund" />% of their cost.</small></span>
+                </label>
+                <label class="check" style="margin-top:12px">
+                    <input type="checkbox" checked="@_t.FurnaceSplit" @onchange="e => { _t.FurnaceSplit = e.Value is true; }" />
+                    <span><b>Furnace auto-split</b><small>Ore a player drops into a furnace, large furnace or refinery is spread evenly over the free input slots, so it all smelts at once. Conveyors and industrial setups are left alone, and players can turn it off for themselves with <code>/autosplit</code>. Works whether or not custom rates are on.</small></span>
+                </label>
+            </div>
+        </section>
+
+        <div class="tabs" role="tablist">
+            <button role="tab" class="@(_tab == "gather" ? "on" : "")" @onclick='() => _tab = "gather"'>Gather rates · @_t.RateLabel</button>
+            <button role="tab" class="@(_tab == "stacks" ? "on" : "")" @onclick='() => SwitchTab("stacks")'>Stack sizes@(_t.StackOverrides.Count > 0 ? $" · {_t.StackOverrides.Count} custom" : "")</button>
+            <button role="tab" class="@(_tab == "smelt" ? "on" : "")" @onclick='() => SwitchTab("smelt")'>Furnaces &amp; cooking</button>
+        </div>
+
+        <div style="@(_t.Enabled ? "" : "opacity:.55")">
+        @if (_tab == "gather")
+        {
+            <div class="grid g-2">
+                <section class="panel">
+                    <div class="panel-head"><h2>Server rate</h2></div>
+                    <div class="panel-body stack" style="gap:14px">
+                        <div class="row" style="gap:10px;flex-wrap:wrap">
+                            <div class="seg">
+                                @foreach (var p in Presets)
+                                {
+                                    <button class="@(Same(_t.GatherRate, p) ? "on" : "")" @onclick="() => _t.GatherRate = p">@(p)x</button>
+                                }
+                            </div>
+                            <input class="input" style="width:100px" type="number" min="0.1" step="0.5" value="@Num(_t.GatherRate)" @onchange="e => _t.GatherRate = Parse(e, 1)" />
+                        </div>
+                        <small class="muted">Every resource you gather is multiplied by this, unless it has its own rate below.</small>
+                        <label class="check">
+                            <input type="checkbox" checked="@_t.ShowRateInHostname" @onchange="e => _t.ShowRateInHostname = e.Value is true" />
+                            <span><b>Show the rate in the server name</b><small>Server name becomes “@PreviewHostname”.</small></span>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Where it applies</h2></div>
+                    <div class="panel-body form-grid">
+                        @SourceInput("Hitting trees, rocks, bodies", "Chopping, mining nodes and harvesting animals", () => _t.SourceHits, v => _t.SourceHits = v)
+                        @SourceInput("Picking up", "Hemp, mushrooms, stones and wood on the ground", () => _t.SourcePickups, v => _t.SourcePickups = v)
+                        @SourceInput("Farming", "Crops you plant and harvest", () => _t.SourceCrops, v => _t.SourceCrops = v)
+                        @SourceInput("Quarries & excavator", "Mining quarries, pump jacks, excavator, survey charges", () => _t.SourceQuarries, v => _t.SourceQuarries = v)
+                        <small class="wide muted">Extra factor on top of the rate: 1 = same as the server rate, 0.5 = half of it, 2 = double.</small>
+                    </div>
+                </section>
+            </div>
+
+            <section class="panel mt">
+                <div class="panel-head"><h2>Per resource</h2><span class="spacer"></span><span class="hint">leave blank to use the server rate</span></div>
+                <div class="panel-body flush table-wrap">
+                    <table class="table">
+                        <thead><tr><th>Resource</th><th>Own rate</th><th class="r">Chopping/mining</th><th class="r">Pickups</th><th class="r">Quarries</th></tr></thead>
+                        <tbody>
+                            @foreach (var (shortName, name) in GameTweaks.Resources)
+                            {
+                                var own = _t.GatherByItem.TryGetValue(shortName, out var r) ? r : (double?)null;
+                                var rate = own ?? _t.GatherRate;
+                                <tr>
+                                    <td><span class="item-cell">@ItemIcon(shortName)<span>@name <span class="muted" style="font-size:12px">@shortName</span></span></span></td>
+                                    <td>
+                                        <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                            <input class="input" style="width:90px" type="number" min="0" step="0.5" placeholder="@Num(_t.GatherRate)" value="@(own is null ? "" : Num(own.Value))" @onchange="e => SetGatherItem(shortName, e)" />
+                                            @if (own is not null)
+                                            {
+                                                <button class="btn sm ghost" title="Use server rate" @onclick="() => _t.GatherByItem.Remove(shortName)">✕</button>
+                                            }
+                                        </div>
+                                    </td>
+                                    <td class="r num">@Num(rate * _t.SourceHits)x</td>
+                                    <td class="r num">@Num(rate * _t.SourcePickups)x</td>
+                                    <td class="r num">@Num(rate * _t.SourceQuarries)x</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+        else if (_tab == "stacks")
+        {
+            <div class="grid g-2">
+                <section class="panel">
+                    <div class="panel-head"><h2>Base stack multiplier</h2></div>
+                    <div class="panel-body stack" style="gap:12px">
+                        <div class="row" style="gap:10px;flex-wrap:wrap">
+                            <div class="seg">
+                                @foreach (var p in Presets)
+                                {
+                                    <button class="@(Same(_t.StackRate, p) ? "on" : "")" @onclick="() => _t.StackRate = p">@(p)x</button>
+                                }
+                            </div>
+                            <input class="input" style="width:100px" type="number" min="0.1" step="0.5" value="@Num(_t.StackRate)" @onchange="e => _t.StackRate = Parse(e, 1)" />
+                        </div>
+                        <small class="muted">Multiplies every item that already stacks (wood 1000 → 10 000 at 10x). Guns, tools and clothing stay at 1 unless you set them below.</small>
+                    </div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h2>By category</h2><span class="spacer"></span><span class="hint">blank = base</span></div>
+                    <div class="panel-body form-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+                        @foreach (var cat in Categories)
+                        {
+                            var has = _t.StackByCategory.TryGetValue(cat, out var cm);
+                            <label class="field">
+                                <span>@cat</span>
+                                <input type="number" min="0" step="0.5" placeholder="@Num(_t.StackRate)x" value="@(has ? Num(cm) : "")" @onchange="e => SetCategory(cat, e)" />
+                            </label>
+                        }
+                    </div>
+                </section>
+            </div>
+
+            <section class="panel mt">
+                <div class="panel-head" style="flex-wrap:wrap;gap:8px">
+                    <h2>Items</h2>
+                    <span class="spacer"></span>
+                    <input class="input" style="max-width:220px" placeholder="Search items" @bind="_search" @bind:event="oninput" />
+                    <select class="input" style="width:auto" @bind="_catFilter">
+                        <option value="">All categories</option>
+                        @foreach (var cat in Categories) { <option value="@cat">@cat</option> }
+                    </select>
+                    <label class="check" style="align-items:center"><input type="checkbox" @bind="_changedOnly" /><span>Custom only</span></label>
+                    <button class="btn sm" @onclick="() => LoadItemsAsync(true)" disabled="@_loadingItems">@(_loadingItems ? "Loading…" : "Refresh list")</button>
+                </div>
+                <div class="panel-body flush table-wrap">
+                    @if (_items.Count == 0)
+                    {
+                        <div class="empty">
+                            <p>@(_itemsError ?? "Loading the item list from your server…")</p>
+                        </div>
+                    }
+                    else
+                    {
+                        var rows = FilteredItems().ToList();
+                        var visible = rows.Take(_shown).ToList();
+                        var allPicked = visible.Count > 0 && visible.All(i => _picked.Contains(i.Short));
+                        if (_picked.Count > 0)
+                        {
+                            <div class="bulk-bar">
+                                <b>@_picked.Count selected</b>
+                                <span class="muted">Multiply vanilla stack by</span>
+                                <div class="stepper">
+                                    <button class="btn sm ghost" title="Lower" @onclick="() => StepMultiplier(-1)">▼</button>
+                                    <input class="input" type="number" min="0.1" step="any" value="@Num(_bulk)" @onchange="e => _bulk = Parse(e, _bulk)" />
+                                    <span class="muted">x</span>
+                                    <button class="btn sm ghost" title="Higher" @onclick="() => StepMultiplier(1)">▲</button>
+                                </div>
+                                <button class="btn sm primary" @onclick="ApplyBulk">Set @_picked.Count item@(_picked.Count == 1 ? "" : "s")</button>
+                                <button class="btn sm ghost" @onclick="ResetPicked">Back to vanilla</button>
+                                <span class="spacer"></span>
+                                <button class="btn sm ghost" @onclick="() => _picked.Clear()">Clear selection</button>
+                            </div>
+                        }
+                        <table class="table">
+                            <thead><tr>
+                                <th style="width:34px"><input type="checkbox" class="pick" title="Select all shown" checked="@allPicked" @onchange="e => PickAll(visible, e.Value is true)" /></th>
+                                <th>Item</th><th>Category</th><th class="r">Vanilla</th><th class="r">Current</th><th class="r">@(_picked.Count > 0 ? $"At {Num(_bulk)}x" : "")</th><th>Exact stack size</th>
+                            </tr></thead>
+                            <tbody>
+                                @foreach (var i in visible)
+                                {
+                                    var exact = _t.StackOverrides.TryGetValue(i.Short, out var ex) ? ex : (int?)null;
+                                    var effective = Effective(i);
+                                    var picked = _picked.Contains(i.Short);
+                                    <tr class="@(picked ? "picked" : "")">
+                                        <td><input type="checkbox" class="pick" checked="@picked" @onchange="e => Pick(i.Short, e.Value is true)" /></td>
+                                        <td title="@i.Description"><span class="item-cell">@ItemIcon(i.Short)<span>@i.Name <span class="muted" style="font-size:12px">@i.Short</span></span></span></td>
+                                        <td class="muted">@i.Category</td>
+                                        <td class="r num">@i.DefaultStack.ToString("N0")</td>
+                                        <td class="r num @(effective != i.DefaultStack ? "accent" : "")">@effective.ToString("N0")</td>
+                                        <td class="r num">
+                                            @if (picked)
+                                            {
+                                                var preview = BulkValue(i);
+                                                <span class="@(preview > effective ? "good" : preview < effective ? "warn" : "muted")">→ @preview.ToString("N0")</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                                <input class="input" style="width:110px" type="number" min="1" step="1" placeholder="@effective" value="@(exact?.ToString() ?? "")" @onchange="e => SetOverride(i.Short, e)" />
+                                                @if (exact is not null)
+                                                {
+                                                    <button class="btn sm ghost" title="Remove" @onclick="() => _t.StackOverrides.Remove(i.Short)">✕</button>
+                                                }
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (rows.Count > _shown)
+                        {
+                            <div class="empty"><button class="btn sm" @onclick="() => _shown += 200">Show more (@(rows.Count - _shown) left)</button></div>
+                        }
+                        else if (rows.Count == 0)
+                        {
+                            <div class="empty"><p>No items match.</p></div>
+                        }
+                    }
+                </div>
+            </section>
+            @if (_t.StackOverrides.Count > 0)
+            {
+                <div class="row mt"><button class="btn sm ghost" @onclick="() => _t.StackOverrides.Clear()">Remove all @_t.StackOverrides.Count exact sizes</button></div>
+            }
+        }
+        else
+        {
+            <div class="grid g-2">
+                <section class="panel">
+                    <div class="panel-head"><h2>Smelting</h2><span class="spacer"></span><span class="hint">ores &amp; crude oil</span></div>
+                    <div class="panel-body form-grid">
+                        @SourceInput("Smelt speed", "2 = twice as fast", () => _t.SmeltSpeed, v => _t.SmeltSpeed = v)
+                        @SourceInput("Output per item", "2 = 1 metal ore gives 2 fragments", () => _t.SmeltOutput, v => _t.SmeltOutput = v)
+                        @SourceInput("Food cooking speed", "Campfires, BBQs and furnaces", () => _t.CookSpeed, v => _t.CookSpeed = v)
+                    </div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h2>Fuel</h2></div>
+                    <div class="panel-body form-grid">
+                        @SourceInput("Wood use", "0.5 = each wood burns twice as long", () => _t.FuelUse, v => _t.FuelUse = v)
+                        @SourceInput("Charcoal", "2 = double charcoal from burned wood", () => _t.Charcoal, v => _t.Charcoal = v)
+                        <div class="wide">
+                            <div class="muted" style="font-size:13px;margin-bottom:8px">Wood use per oven (blank = @Num(_t.FuelUse)):</div>
+                            <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">
+                                @foreach (var (prefab, name) in GameTweaks.Ovens)
+                                {
+                                    var has = _t.FuelUseByOven.TryGetValue(prefab, out var fu);
+                                    <label class="field">
+                                        <span>@name</span>
+                                        <input type="number" min="0.05" step="0.1" placeholder="@Num(_t.FuelUse)" value="@(has ? Num(fu) : "")" @onchange="e => SetOven(prefab, e)" />
+                                    </label>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <section class="panel mt">
+                <div class="panel-head"><h2>What it means</h2><span class="spacer"></span><span class="hint">in a furnace, per item</span></div>
+                <div class="panel-body flush table-wrap">
+                    @{ var cookables = _items.Where(i => i.CookTo is not null && i.CookTime > 0 && (i.Category == "Resources" || i.Category == "Food")).ToList(); }
+                    @if (cookables.Count == 0)
+                    {
+                        <div class="empty"><p>@(_itemsError ?? (_items.Count > 0 ? "Cooking times come from the plugin. Start the server, press Apply, then Refresh list on the Stack sizes tab." : "Loading cooking times from your server…"))</p></div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Item</th><th>Becomes</th><th class="r">Vanilla</th><th class="r">Now</th><th class="r">1000 items take</th></tr></thead>
+                            <tbody>
+                                @foreach (var i in cookables)
+                                {
+                                    var ore = i.Category == "Resources";
+                                    var speed = ore ? _t.SmeltSpeed : _t.CookSpeed;
+                                    double amount = ore ? Math.Max(1, Math.Round(i.CookAmount * _t.SmeltOutput)) : i.CookAmount;
+                                    var time = i.CookTime / Math.Max(0.01, speed);
+                                    var toName = _items.FirstOrDefault(x => x.Short == i.CookTo)?.Name ?? i.CookTo;
+                                    <tr>
+                                        <td><span class="item-cell">@ItemIcon(i.Short)<span>@i.Name</span></span></td>
+                                        <td class="muted">@toName</td>
+                                        <td class="r num">@Num(i.CookAmount) per @Num(i.CookTime) s</td>
+                                        <td class="r num @(Same(time, i.CookTime) && Same(amount, i.CookAmount) ? "" : "accent")">@Num(amount) per @Num(time) s</td>
+                                        <td class="r num">@Duration(time * 1000) → @((amount * 1000).ToString("N0"))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        <div class="panel-body"><small class="muted">Times are for one slot of a small furnace. Large furnaces cook more slots at once. Faster smelting also means less wood per ore, on top of the wood use setting.</small></div>
+                    }
+                </div>
+            </section>
+        }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly double[] Presets = { 1, 2, 3, 5, 10 };
+    private static readonly string[] DefaultCategories = { "Resources", "Ammunition", "Medical", "Food", "Construction", "Items", "Component", "Electrical", "Traps", "Tool", "Weapon", "Attire", "Fun", "Misc" };
+
+    private GameTweaks? _t;
+    private string _saved = "";
+    private string _tab = "gather";
+    private bool _busy, _loadingItems;
+    private string? _status;
+    private List<RustItem> _items = new();
+    private string? _itemsError;
+    private string _search = "", _catFilter = "";
+    private bool _changedOnly;
+    private int _shown = 200;
+    private int _loadedFor;
+
+    protected override TimeSpan RefreshInterval => TimeSpan.FromSeconds(5);
+
+    private bool Dirty => _t is not null && JsonSerializer.Serialize(_t) != _saved;
+
+    private IEnumerable<string> Categories => _items.Count == 0
+        ? DefaultCategories
+        : _items.Select(i => i.Category).Distinct().OrderBy(CategoryOrder).ThenBy(c => c);
+
+    private static int CategoryOrder(string c)
+    {
+        var n = Array.IndexOf(DefaultCategories, c);
+        return n < 0 ? 99 : n;
+    }
+
+    private void SetRemoveRefund(ChangeEventArgs e)
+    {
+        if (_t is not null && double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pct))
+            _t.RemoveRefund = Math.Clamp(pct, 0, 100) / 100.0;
+    }
+
+    private string StatusText => _status switch
+    {
+        "applied" => "Active in game",
+        "off" => "Plugin loaded · off",
+        "config unreadable" => "Config error",
+        _ when Server is not null && !Runtime.IsOnline => "Server offline",
+        _ when Server is not null && TweaksService.IsInstalled(Server) => "Plugin not loaded",
+        _ => "Not installed yet",
+    };
+
+    private string StatusClass => _status switch { "applied" => "good", "config unreadable" => "bad", "off" => "", _ => "warn" };
+
+    private string PreviewHostname
+    {
+        get
+        {
+            if (Server is null || _t is null) return "";
+            var copy = new ServerSettings { Hostname = Server.Settings.Hostname, Tweaks = new GameTweaks { Enabled = true, ShowRateInHostname = true, GatherRate = _t.GatherRate } };
+            return copy.EffectiveHostname;
+        }
+    }
+
+    protected override async Task OnServerChangedAsync()
+    {
+        if (Server is null || _loadedFor == Id) return;
+        _loadedFor = Id;
+        _t = Clone(Server.Settings.Tweaks);
+        _saved = JsonSerializer.Serialize(_t);
+        _items = new();
+        _itemsError = null;
+        _status = await Tweaks.StatusAsync(Server);
+        _ = LoadItemsAsync(false);
+    }
+
+    private static GameTweaks Clone(GameTweaks t) => JsonSerializer.Deserialize<GameTweaks>(JsonSerializer.Serialize(t)) ?? new GameTweaks();
+
+    private void SwitchTab(string tab)
+    {
+        _tab = tab;
+        if (_items.Count == 0 && !_loadingItems) _ = LoadItemsAsync(false);
+    }
+
+    private async Task LoadItemsAsync(bool refresh)
+    {
+        if (Server is null) return;
+        _loadingItems = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            var (items, error) = await Tweaks.GetItemsAsync(Server, refresh);
+            if (items.Count > 0 || refresh || _items.Count == 0) { _items = items; _itemsError = error; }
+        }
+        finally
+        {
+            _loadingItems = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void Revert()
+    {
+        if (Server is null) return;
+        _t = Clone(Server.Settings.Tweaks);
+        _saved = JsonSerializer.Serialize(_t);
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (Server is null || _t is null) return;
+        _busy = true;
+        try
+        {
+            var server = await Servers.GetAsync(Id);
+            if (server is null) return;
+            server.Settings.Tweaks = Clone(_t);
+            await Servers.SaveAsync(server);
+            _saved = JsonSerializer.Serialize(_t);
+            var err = await Tweaks.ApplyAsync(server);
+            await ReloadServerAsync();
+            if (err is not null) { Toasts.Error(err); return; }
+            if (Runtime.IsOnline)
+            {
+                await Task.Delay(1500);
+                _status = await Tweaks.StatusAsync(server);
+                if (_status == "applied" || (_status == "off" && !_t.Enabled))
+                    Toasts.Success(_t.Enabled ? "Applied — live in game now."
+                        : _t.Sorting || _t.FurnaceSplit || _t.RemoveTool ? "Saved. Custom rates are off; your other tweaks are on." : "Custom rates turned off — vanilla values restored.");
+                else Toasts.Error("Saved, but the plugin didn't confirm. Check the console for a compile error.");
+                if (_items.Count == 0) await LoadItemsAsync(true);
+            }
+            else
+            {
+                Toasts.Success("Saved. It applies the next time the server starts.");
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private int Effective(RustItem i)
+    {
+        if (_t is null) return i.DefaultStack;
+        if (_t.StackOverrides.TryGetValue(i.Short, out var exact) && exact > 0) return exact;
+        if (i.DefaultStack <= 1) return i.DefaultStack;
+        var m = _t.StackByCategory.TryGetValue(i.Category, out var cm) ? cm : _t.StackRate;
+        return (int)Math.Max(1, Math.Min(1_000_000_000, Math.Round(i.DefaultStack * m)));
+    }
+
+    private IEnumerable<RustItem> FilteredItems()
+    {
+        IEnumerable<RustItem> q = _items;
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var s = _search.Trim();
+            q = q.Where(i => i.Name.Contains(s, StringComparison.OrdinalIgnoreCase) || i.Short.Contains(s, StringComparison.OrdinalIgnoreCase));
+        }
+        if (!string.IsNullOrEmpty(_catFilter)) q = q.Where(i => i.Category == _catFilter);
+        if (_changedOnly && _t is not null) q = q.Where(i => _t.StackOverrides.ContainsKey(i.Short));
+        return q;
+    }
+
+    // ---------------------------------------------------------------- bulk stack editing
+
+    private static readonly double[] BulkSteps = { 0.5, 1, 1.5, 2, 3, 4, 5, 10, 15, 20, 25, 50, 100 };
+    private readonly HashSet<string> _picked = new(StringComparer.OrdinalIgnoreCase);
+    private double _bulk = 2;
+
+    private void Pick(string shortName, bool on)
+    {
+        if (on) _picked.Add(shortName); else _picked.Remove(shortName);
+    }
+
+    private void PickAll(List<RustItem> visible, bool on)
+    {
+        foreach (var i in visible) Pick(i.Short, on);
+    }
+
+    private void StepMultiplier(int direction)
+    {
+        _bulk = direction > 0
+            ? BulkSteps.FirstOrDefault(v => v > _bulk + 0.0001, _bulk)
+            : BulkSteps.LastOrDefault(v => v < _bulk - 0.0001, _bulk);
+    }
+
+    private static int Multiply(int vanilla, double m) => (int)Math.Max(1, Math.Min(1_000_000_000, Math.Round(Math.Max(1, vanilla) * m)));
+
+    private int BulkValue(RustItem i) => Multiply(i.DefaultStack, _bulk);
+
+    private void ApplyBulk()
+    {
+        if (_t is null) return;
+        var count = 0;
+        foreach (var i in _items.Where(i => _picked.Contains(i.Short)))
+        {
+            var v = BulkValue(i);
+            if (v == i.DefaultStack && !_t.StackByCategory.ContainsKey(i.Category) && Same(_t.StackRate, 1)) _t.StackOverrides.Remove(i.Short);
+            else _t.StackOverrides[i.Short] = v;
+            count++;
+        }
+        Toasts.Success($"{count} item{(count == 1 ? "" : "s")} set to {Num(_bulk)}x vanilla. Press Save & apply to use them in game.");
+        _picked.Clear();
+    }
+
+    private void ResetPicked()
+    {
+        if (_t is null) return;
+        foreach (var s in _picked) _t.StackOverrides.Remove(s);
+        _picked.Clear();
+    }
+
+    private List<RustItem>? _iconsFor;
+    private HashSet<string> _icons = new();
+
+    private RenderFragment ItemIcon(string shortName) => __builder =>
+    {
+        if (!ReferenceEquals(_iconsFor, _items))
+        {
+            _iconsFor = _items;
+            _icons = _items.Where(i => i.HasIcon).Select(i => i.Short).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        if (_icons.Contains(shortName))
+        {
+            <img class="item-icon" src="api/servers/@Id/item-icon/@shortName" alt="" loading="lazy" />
+        }
+        else
+        {
+            <span class="item-icon"></span>
+        }
+    };
+
+    private static bool Same(double a, double b) => Math.Abs(a - b) < 0.0001;
+    private static string Num(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static string Duration(double seconds) =>
+        seconds >= 3600 ? $"{seconds / 3600:0.#} h" : seconds >= 60 ? $"{seconds / 60:0.#} min" : $"{seconds:0} s";
+
+    private static double? ParseOptional(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString()?.Trim().Replace(',', '.');
+        if (string.IsNullOrEmpty(text)) return null;
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0 ? Math.Min(v, 1_000_000) : null;
+    }
+
+    private static double Parse(ChangeEventArgs e, double fallback) => ParseOptional(e) is { } v && v > 0 ? v : fallback;
+
+    private void SetGatherItem(string key, ChangeEventArgs e)
+    {
+        if (ParseOptional(e) is { } v) _t!.GatherByItem[key] = v; else _t!.GatherByItem.Remove(key);
+    }
+
+    private void SetCategory(string key, ChangeEventArgs e)
+    {
+        if (ParseOptional(e) is { } v && v > 0) _t!.StackByCategory[key] = v; else _t!.StackByCategory.Remove(key);
+    }
+
+    private void SetOven(string key, ChangeEventArgs e)
+    {
+        if (ParseOptional(e) is { } v && v > 0) _t!.FuelUseByOven[key] = v; else _t!.FuelUseByOven.Remove(key);
+    }
+
+    private void SetOverride(string key, ChangeEventArgs e)
+    {
+        if (ParseOptional(e) is { } v && v >= 1) _t!.StackOverrides[key] = (int)Math.Min(1_000_000_000, Math.Round(v)); else _t!.StackOverrides.Remove(key);
+    }
+
+    private RenderFragment SourceInput(string label, string help, Func<double> get, Action<double> set) => __builder =>
+    {
+        <label class="field">
+            <span>@label</span>
+            <input type="number" min="0.05" step="0.5" value="@Num(get())" @onchange="e => set(Parse(e, 1))" />
+            <small>@help</small>
+        </label>
+    };
+}

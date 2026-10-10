@@ -1,0 +1,597 @@
+@page "/s/{Id:int}/skills"
+@inherits ServerPageBase
+@inject SkillsService SkillsApi
+@inject IDbContextFactory<AppDbContext> DbFactory
+@using System.Globalization
+@using System.Text.Json.Nodes
+
+<PageTitle>@(Server?.Name ?? "Server") · Skills</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Skills &amp; perks</h1>
+                <p>Levels, perks and XP events from the Skills plugin. Players open their skill menu in game with <code>/skills</code>.</p>
+            </div>
+            @if (_summary is not null)
+            {
+                <span class="badge good">Plugin v@(_summary.Version)</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="RefreshAsync" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (!Runtime.IsOnline)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The server is offline. Leaderboards and XP events come from the running plugin, so start the server to see them. Balance settings can still be edited.</div>
+        }
+        else if (_summary is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The Skills plugin didn't answer. Install it from <a href="s/@Id/telemetry">Telemetry → Skills &amp; perks</a>, then refresh.</div>
+        }
+
+        @if (_summary is not null)
+        {
+            var popular = _summary.PerkOwners.Where(kv => kv.Value > 0).OrderByDescending(kv => kv.Value).FirstOrDefault();
+            var bestSkill = _summary.AvgLevel.OrderByDescending(kv => kv.Value).FirstOrDefault();
+            <div class="duel" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:var(--gap)">
+                <div><span class="muted">Players with skills</span><b>@_summary.Players</b></div>
+                <div><span class="muted">Most levelled skill</span><b>@(bestSkill.Key is null ? "—" : $"{SkillsService.SkillName(bestSkill.Key)} · avg {bestSkill.Value:0.#}")</b></div>
+                <div><span class="muted">Most popular perk</span><b class="ellipsis">@(popular.Key is null ? "—" : $"{SkillsService.Perk(popular.Key)?.Name ?? popular.Key} · {popular.Value}")</b></div>
+                <div><span class="muted">XP event</span><b class="@(_summary.EventOn ? "accent" : "")">@EventLabel(_summary)</b></div>
+            </div>
+        }
+
+        <div class="tabs" role="tablist">
+            <button role="tab" class="@(_tab == "players" ? "on" : "")" @onclick='() => _tab = "players"'>Players</button>
+            <button role="tab" class="@(_tab == "balance" ? "on" : "")" @onclick="OpenBalanceAsync">Balance</button>
+            <button role="tab" class="@(_tab == "events" ? "on" : "")" @onclick="OpenEventsAsync">XP events</button>
+        </div>
+
+        @if (_tab == "players")
+        {
+            <div class="grid @(Player is null ? "" : "g-side")" style="@(Player is null ? "" : "grid-template-columns:minmax(0,1fr) minmax(360px,460px)")">
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Leaderboard</h2>
+                        <span class="spacer"></span>
+                        <input class="input" style="width:170px" placeholder="Search players" @bind="_search" @bind:event="oninput" />
+                        <select class="input" style="width:auto" value="@_rankBy" @onchange="RankByChangedAsync" aria-label="Rank by">
+                            <option value="">Overall</option>
+                            @foreach (var s in SkillsService.Skills)
+                            {
+                                <option value="@s.Id">@s.Name</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="panel-body flush table-wrap">
+                        @{ var rows = FilteredRows(); }
+                        @if (_top is null)
+                        {
+                            <div class="empty">@(Runtime.IsOnline ? (_loaded ? "No data from the plugin." : "Loading…") : "Start the server to see the leaderboard.")</div>
+                        }
+                        else if (rows.Count == 0)
+                        {
+                            <div class="empty">@(_top.Count == 0 ? "Nobody has earned any XP yet." : "No players match that search.")</div>
+                        }
+                        else
+                        {
+                            <table class="table skills-table">
+                                <thead>
+                                    <tr>
+                                        <th class="r" style="width:36px">#</th>
+                                        <th>Player</th>
+                                        <th class="r">Total</th>
+                                        @foreach (var s in SkillsService.Skills)
+                                        {
+                                            <th class="lvl" title="@s.Name"><img src="api/servers/@Id/item-icon/@s.Icon" alt="@s.Name" width="22" height="22" style="width:22px;height:22px;object-fit:contain" loading="lazy" onerror="this.style.visibility='hidden'" /></th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var (p, rank) in rows)
+                                    {
+                                        <tr class="clickable" @onclick="() => Open(p.Id)" style="@(p.Id == Player ? "background:var(--steel-750)" : "")">
+                                            <td class="r muted num">@rank</td>
+                                            <td class="ellipsis" style="max-width:200px">@if (p.Online) {<span class="online-dot" title="Online"></span>}@(string.IsNullOrEmpty(p.Name) ? p.Id : p.Name)</td>
+                                            <td class="r num">@p.Total</td>
+                                            @foreach (var s in SkillsService.Skills)
+                                            {
+                                                var lv = p.Level(s.Id).Level;
+                                                <td class="lvl @(lv <= 1 ? "zero" : "") @(s.Id == _rankBy ? "accent" : "")">@lv</td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+                @if (Player is not null)
+                {
+                    <section class="panel">
+                        <div class="panel-head">
+                            <h2 class="ellipsis">@(_top?.FirstOrDefault(x => x.Id == Player)?.Name ?? Player)</h2>
+                            <span class="spacer"></span>
+                            <button class="btn sm ghost" @onclick="Close" aria-label="Close">Close</button>
+                        </div>
+                        <div class="panel-body">
+                            <SkillsPlayerPanel @key="Player" ServerId="Id" SteamId="@Player" OnChanged="RefreshAsync" />
+                        </div>
+                    </section>
+                }
+            </div>
+        }
+        else if (_tab == "balance")
+        {
+            @if (_configError is not null)
+            {
+                <div class="callout warn">@_configError</div>
+            }
+            else if (_config is not null)
+            {
+                <div class="row" style="margin-bottom:var(--gap)">
+                    <p class="muted" style="margin:0;flex:1">Changes are written to <code>@Path.GetFileName(SkillsService.ConfigPath(Server))</code> and the plugin reloads, so they apply straight away. Player progress is kept.</p>
+                    @if (_configDirty)
+                    {
+                        <button class="btn ghost" @onclick="OpenBalanceAsync" disabled="@_busy">Discard</button>
+                    }
+                    <button class="btn primary" @onclick="SaveBalanceAsync" disabled="@(_busy || !_configDirty)"><Icon Name="save" /> Save &amp; reload</button>
+                </div>
+
+                <div class="grid g-2">
+                    @foreach (var (title, hint, keys) in BalanceGroups())
+                    {
+                        <section class="panel">
+                            <div class="panel-head"><h2>@title</h2><span class="spacer"></span><span class="hint">@hint</span></div>
+                            <div class="panel-body form-grid">
+                                @foreach (var key in keys)
+                                {
+                                    @ValueField(_config, key)
+                                }
+                            </div>
+                        </section>
+                    }
+                </div>
+
+                <section class="panel mt">
+                    <div class="panel-head"><h2>Perks</h2><span class="spacer"></span><span class="hint">ranks cost @(CostsRank ? "their rank in points (rank 3 costs 3)" : "1 point each")</span></div>
+                    <div class="panel-body flush table-wrap">
+                        <table class="table perk-table">
+                            <thead><tr><th>Skill</th><th>Perk</th><th>On</th><th>Max rank</th><th>Bonus per rank</th><th>At max rank</th><th class="r">Players</th></tr></thead>
+                            <tbody>
+                                @foreach (var perk in SkillsService.Perks)
+                                {
+                                    var node = (_config["Perks"] as JsonObject)?[perk.Id] as JsonObject;
+                                    if (node is null) continue;
+                                    var raw = SkillsService.IsRawPerk(perk.Id);
+                                    var on = node["Enabled"]?.GetValue<bool>() ?? true;
+                                    var maxRank = (int)Num(node, "Max rank");
+                                    var per = Num(node, PerRankKey(node));
+                                    <tr style="@(on ? "" : "opacity:.55")">
+                                        <td class="muted">@SkillsService.SkillName(perk.Skill)</td>
+                                        <td><b>@perk.Name</b></td>
+                                        <td><input type="checkbox" checked="@on" @onchange="e => SetPerkEnabled(node, e)" aria-label="Enabled" /></td>
+                                        <td><input class="input" type="number" min="0" max="20" step="1" value="@maxRank" @onchange="e => SetPerkMax(node, e)" /></td>
+                                        <td>
+                                            <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                                <input class="input" type="number" min="0" step="any" value="@F(raw ? per : per * 100)" @onchange="e => SetPerkBonus(node, e, raw)" />
+                                                <span class="muted">@(raw ? "" : "%")</span>
+                                            </div>
+                                        </td>
+                                        <td class="muted">@string.Format(CultureInfo.InvariantCulture, perk.Effect, F(raw ? per * maxRank : per * maxRank * 100))</td>
+                                        <td class="r num">@(_summary?.PerkOwners.GetValueOrDefault(perk.Id) ?? 0)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                @if (_config["Combat XP by prefab"] is JsonObject combat)
+                {
+                    <section class="panel mt">
+                        <div class="panel-head"><h2>Combat XP by kill</h2><span class="spacer"></span><span class="hint">by the victim's prefab name</span></div>
+                        <div class="panel-body form-grid" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+                            @foreach (var kv in combat.ToList())
+                            {
+                                var name = kv.Key;
+                                <label class="field">
+                                    <span>@name</span>
+                                    <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                        <input class="input" type="number" min="0" step="5" value="@F(Num(combat, name))" @onchange="e => SetNum(combat, name, e)" />
+                                        <button class="btn sm ghost" title="Remove" @onclick="() => { combat.Remove(name); _configDirty = true; }"><Icon Name="trash" /></button>
+                                    </div>
+                                </label>
+                            }
+                            <div class="field">
+                                <span>Add a prefab</span>
+                                <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                    <input class="input" placeholder="e.g. scarecrow" @bind="_newPrefab" />
+                                    <button class="btn sm" @onclick="() => AddPrefab(combat)">Add</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                }
+            }
+        }
+        else if (_tab == "events")
+        {
+            <div class="grid g-2">
+                <section class="panel">
+                    <div class="panel-head"><h2>Right now</h2></div>
+                    <div class="panel-body stack" style="gap:14px">
+                        @if (_summary is null)
+                        {
+                            <p class="muted" style="margin:0">@(Runtime.IsOnline ? "The Skills plugin isn't answering." : "Start the server to run an XP event.")</p>
+                        }
+                        else if (_summary.EventOn)
+                        {
+                            <div class="callout good"><b>@EventLabel(_summary)</b> is running. Every skill earns @F(_summary.XpRate)x XP, and players see it in their skills menu.</div>
+                            <div><button class="btn danger" @onclick="() => SetRateAsync(1, 0)" disabled="@_busy">Stop the event</button></div>
+                        }
+                        else
+                        {
+                            <p class="muted" style="margin:0">No XP event is running. Starting one announces it in chat.</p>
+                        }
+                        @if (_summary is not null)
+                        {
+                            <div class="field">
+                                <span>XP multiplier</span>
+                                <div class="seg">
+                                    @foreach (var r in new[] { 1.5, 2, 3 })
+                                    {
+                                        <button class="@(Same(_rate, r) ? "on" : "")" @onclick="() => _rate = r">@F(r)x</button>
+                                    }
+                                </div>
+                            </div>
+                            <div class="field">
+                                <span>How long</span>
+                                <div class="seg">
+                                    @foreach (var (label, minutes) in Durations)
+                                    {
+                                        <button class="@(Same(_minutes, minutes) ? "on" : "")" @onclick="() => _minutes = minutes">@label</button>
+                                    }
+                                </div>
+                            </div>
+                            <div><button class="btn primary" @onclick="() => SetRateAsync(_rate, _minutes)" disabled="@_busy"><Icon Name="bolt" /> Start @F(_rate)x XP</button></div>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Every weekend</h2><span class="spacer"></span><a class="btn sm" href="s/@Id/schedules">All schedules</a></div>
+                    <div class="panel-body stack" style="gap:14px">
+                        <p class="muted" style="margin:0">Adds a weekly schedule that starts an XP event on its own. It runs from the manager, so the manager needs to be running.</p>
+                        <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+                            <label class="field">
+                                <span>Starts on</span>
+                                <select class="input" @bind="_weekDay">
+                                    @foreach (var d in new[] { DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday, DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday })
+                                    {
+                                        <option value="@d">@d</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="field">
+                                <span>At</span>
+                                <input class="input" type="time" @bind="_weekTime" />
+                            </label>
+                            <label class="field">
+                                <span>For (hours)</span>
+                                <input class="input" type="number" min="1" max="168" @bind="_weekHours" />
+                            </label>
+                            <label class="field">
+                                <span>Multiplier</span>
+                                <select class="input" @bind="_weekRate">
+                                    <option value="1.5">1.5x</option>
+                                    <option value="2">2x</option>
+                                    <option value="3">3x</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div><button class="btn primary" @onclick="AddWeeklyAsync" disabled="@_busy"><Icon Name="schedule" /> Add weekly XP event</button></div>
+                        @if (_eventTasks.Count > 0)
+                        {
+                            <table class="table">
+                                <tbody>
+                                    @foreach (var t in _eventTasks)
+                                    {
+                                        <tr>
+                                            <td>@t.Name<br /><small class="muted">@SchedulerService.Describe(t)@(t.Enabled ? "" : " · paused")</small></td>
+                                            <td class="r"><button class="btn sm danger" @onclick="() => DeleteTaskAsync(t)">Delete</button></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "player")] public string? Player { get; set; }
+
+    private static readonly (string Label, double Minutes)[] Durations =
+        { ("1 hour", 60), ("6 hours", 360), ("24 hours", 1440), ("48 hours", 2880), ("Until stopped", 0) };
+
+    private string _tab = "players";
+    private bool _busy, _loaded;
+    private SkillsSummary? _summary;
+    private List<SkillsPlayer>? _top;
+    private string _rankBy = "", _search = "";
+
+    private JsonObject? _config;
+    private string? _configError;
+    private bool _configDirty;
+    private string _newPrefab = "";
+
+    private double _rate = 2, _minutes = 2880;
+    private DayOfWeek _weekDay = DayOfWeek.Friday;
+    private TimeOnly _weekTime = new(18, 0);
+    private int _weekHours = 54;
+    private string _weekRate = "2";
+    private List<ScheduledTask> _eventTasks = new();
+
+    protected override TimeSpan RefreshInterval => TimeSpan.FromSeconds(10);
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _config = null;
+        _configError = null;
+        _configDirty = false;
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (Runtime.IsOnline)
+            {
+                _summary = await SkillsApi.SummaryAsync(Id);
+                _top = _summary is null ? null : await SkillsApi.TopAsync(Id, 500, _rankBy.Length == 0 ? null : _rankBy);
+            }
+            else
+            {
+                _summary = null;
+                _top = null;
+            }
+            _loaded = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private Task RankByChangedAsync(ChangeEventArgs e) => RankByAsync(e.Value?.ToString() ?? string.Empty);
+
+    private async Task RankByAsync(string skill)
+    {
+        _rankBy = skill;
+        if (Runtime.IsOnline && _summary is not null) _top = await SkillsApi.TopAsync(Id, 500, skill.Length == 0 ? null : skill);
+    }
+
+    private List<(SkillsPlayer Player, int Rank)> FilteredRows()
+    {
+        if (_top is null) return new();
+        return _top.Select((p, i) => (p, i + 1))
+            .Where(x => _search.Length == 0 || x.p.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || x.p.Id.Contains(_search))
+            .ToList();
+    }
+
+    private void Open(string id) => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", id));
+    private void Close() => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", (string?)null));
+
+    private static string EventLabel(SkillsSummary s)
+    {
+        if (!s.EventOn) return "Off";
+        var rate = $"{F(s.XpRate)}x XP";
+        if (s.XpMinutesLeft is not { } m) return rate + " until stopped";
+        var left = m >= 120 ? $"{m / 60:0}h" : $"{m:0}m";
+        return $"{rate} · {left} left";
+    }
+
+    // ------------------------------------------------------------------ balance
+
+    private async Task OpenBalanceAsync()
+    {
+        _tab = "balance";
+        if (Server is null) return;
+        (_config, _configError) = await SkillsService.ReadConfigAsync(Server);
+        _configDirty = false;
+    }
+
+    private bool CostsRank => _config?["Perk ranks cost their rank in points (rank 3 costs 3)"]?.GetValue<bool>() ?? true;
+
+    /// <summary>Splits the plugin's settings into groups by name; anything new lands in "Other".</summary>
+    private IEnumerable<(string Title, string Hint, List<string> Keys)> BalanceGroups()
+    {
+        var keys = _config!.Where(kv => kv.Value is JsonValue).Select(kv => kv.Key).ToList();
+        bool Xp(string k) => k.StartsWith("XP ") || k.StartsWith("No XP") || k.StartsWith("Most XP");
+        bool Team(string k) => k.Contains("Solo") || k.Contains("Team") || k.Contains("team");
+        bool Levels(string k) => k.StartsWith("Max level") || k.StartsWith("XP for level") || k.StartsWith("XP curve") || k.StartsWith("Points per level") || k.StartsWith("Perk ranks");
+        var levels = keys.Where(Levels).ToList();
+        var team = keys.Where(k => !Levels(k) && Team(k)).ToList();
+        var xp = keys.Where(k => !Levels(k) && !Team(k) && Xp(k)).ToList();
+        var other = keys.Except(levels).Except(team).Except(xp).ToList();
+        yield return ("Levels & points", "how fast players level", levels);
+        yield return ("Solo & teams", "keep it fair for solos", team);
+        yield return ("XP for each activity", "before solo and event bonuses", xp);
+        yield return ("Other", "", other);
+    }
+
+    private RenderFragment ValueField(JsonObject obj, string key) => __builder =>
+    {
+        var node = obj[key] as JsonValue;
+        if (node is null) return;
+        if (node.TryGetValue<bool>(out var b))
+        {
+            <label class="check wide">
+                <input type="checkbox" checked="@b" @onchange="e => { obj[key] = e.Value is true; _configDirty = true; }" />
+                <span>@key</span>
+            </label>
+        }
+        else if (TryNumber(node, out var d))
+        {
+            <label class="field">
+                <span>@key</span>
+                <input class="input" type="number" min="0" step="any" value="@F(d)" @onchange="e => SetNum(obj, key, e)" />
+            </label>
+        }
+        else if (node.TryGetValue<string>(out var str))
+        {
+            <label class="field">
+                <span>@key</span>
+                <input class="input" value="@str" @onchange="e => SetStr(obj, key, e)" />
+            </label>
+        }
+    };
+
+    private void SetNum(JsonObject obj, string key, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v < 0) return;
+        var wasInt = obj[key] is JsonValue jv && jv.TryGetValue<int>(out _) && !jv.ToJsonString().Contains('.');
+        obj[key] = wasInt && v == Math.Floor(v) ? JsonValue.Create((int)v) : JsonValue.Create(v);
+        _configDirty = true;
+    }
+
+    private static string PerRankKey(JsonObject perk) =>
+        perk.Select(kv => kv.Key).FirstOrDefault(k => k.StartsWith("Bonus per rank")) ?? "Bonus per rank (0.10 = 10%)";
+
+    private static double Num(JsonObject obj, string key) =>
+        obj[key] is JsonValue v && TryNumber(v, out var d) ? d : 0;
+
+    /// <summary>Numbers read from the file are JsonElements; ones we set are int or double values.</summary>
+    private static bool TryNumber(JsonValue v, out double d)
+    {
+        if (v.TryGetValue(out d)) return true;
+        if (v.TryGetValue<int>(out var i)) { d = i; return true; }
+        if (v.TryGetValue<long>(out var l)) { d = l; return true; }
+        if (v.TryGetValue<float>(out var f)) { d = f; return true; }
+        d = 0;
+        return false;
+    }
+
+    private void SetStr(JsonObject obj, string key, ChangeEventArgs e)
+    {
+        obj[key] = e.Value?.ToString() ?? "";
+        _configDirty = true;
+    }
+
+    private void SetPerkEnabled(JsonObject perk, ChangeEventArgs e)
+    {
+        perk["Enabled"] = e.Value is true;
+        _configDirty = true;
+    }
+
+    private void SetPerkMax(JsonObject perk, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v < 0) return;
+        perk["Max rank"] = (int)Math.Round(v);
+        _configDirty = true;
+    }
+
+    /// <summary>Percent perks are typed as 10 (= 0.10 in the config); raw ones as-is.</summary>
+    private void SetPerkBonus(JsonObject perk, ChangeEventArgs e, bool raw)
+    {
+        if (!double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v < 0) return;
+        perk[PerRankKey(perk)] = Math.Round(raw ? v : v / 100, 4);
+        _configDirty = true;
+    }
+
+    private void AddPrefab(JsonObject combat)
+    {
+        var name = _newPrefab.Trim().ToLowerInvariant();
+        if (name.Length == 0 || combat.ContainsKey(name)) return;
+        combat[name] = 20;
+        _newPrefab = "";
+        _configDirty = true;
+    }
+
+    private async Task SaveBalanceAsync()
+    {
+        if (Server is null || _config is null) return;
+        _busy = true;
+        try
+        {
+            var err = await SkillsApi.SaveConfigAsync(Server, _config);
+            if (err is not null) { Toasts.Error(err); return; }
+            Toasts.Success(Runtime.IsOnline ? "Saved — the plugin reloaded with the new balance." : "Saved. It applies the next time the server starts.");
+            await OpenBalanceAsync();
+            await RefreshAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    // ------------------------------------------------------------------ events
+
+    private async Task OpenEventsAsync()
+    {
+        _tab = "events";
+        await LoadEventTasksAsync();
+    }
+
+    private async Task LoadEventTasksAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _eventTasks = await db.Schedules.AsNoTracking()
+            .Where(t => t.ServerId == Id && t.Action == ScheduleAction.Command && t.Payload.StartsWith("sandboxskills.xprate"))
+            .OrderBy(t => t.Id).ToListAsync();
+    }
+
+    private async Task SetRateAsync(double rate, double minutes)
+    {
+        _busy = true;
+        try
+        {
+            var reply = await SkillsApi.SetXpRateAsync(Id, rate, minutes);
+            if (reply is null) { Toasts.Error("The server is offline."); return; }
+            Toasts.Success(rate > 1 ? $"{F(rate)}x XP started{(minutes > 0 ? $" for {Durations.First(d => Same(d.Minutes, minutes)).Label}" : "")}. Players were told in chat." : "XP event stopped.");
+            await RefreshAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AddWeeklyAsync()
+    {
+        var rate = double.Parse(_weekRate, CultureInfo.InvariantCulture);
+        var hours = Math.Clamp(_weekHours, 1, 168);
+        var t = new ScheduledTask
+        {
+            ServerId = Id,
+            Name = $"{F(rate)}x XP for {hours}h",
+            Kind = ScheduleKind.Weekly,
+            Action = ScheduleAction.Command,
+            DayOfWeek = _weekDay,
+            TimeOfDayMinutes = _weekTime.Hour * 60 + _weekTime.Minute,
+            Payload = SkillsService.XpRateCommand(rate, hours * 60),
+        };
+        t.NextRunUtc = SchedulerService.ComputeNext(t, DateTime.UtcNow);
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            db.Schedules.Add(t);
+            await db.SaveChangesAsync();
+        }
+        Toasts.Success($"Added: {SchedulerService.Describe(t)}, {F(rate)}x XP for {hours} hours.");
+        await LoadEventTasksAsync();
+    }
+
+    private async Task DeleteTaskAsync(ScheduledTask t)
+    {
+        await using (var db = await DbFactory.CreateDbContextAsync())
+            await db.Schedules.Where(x => x.Id == t.Id).ExecuteDeleteAsync();
+        await LoadEventTasksAsync();
+    }
+
+    private static bool Same(double a, double b) => Math.Abs(a - b) < 0.0001;
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}

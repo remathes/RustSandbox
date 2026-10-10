@@ -1,0 +1,35 @@
+@* Vertical columns (hour-of-day, distance buckets, timelines) *@
+@if (Items.Count == 0)
+{
+    <div class="muted" style="font-size:13.5px">@Empty</div>
+}
+else
+{
+    var max = Math.Max(1e-9, Items.Max(i => i.Value));
+    <div class="cols" style="height:@(Height)px">
+        @foreach (var item in Items)
+        {
+            <div class="col" title="@Tip(item)">
+                <i style="height:@((item.Value / max * 100).ToString("0.#", CultureInfo.InvariantCulture))%;@(item.Name == Highlight ? "background:var(--hazard)" : "")"></i>
+            </div>
+        }
+    </div>
+    <div class="cols-labels">
+        @for (var i = 0; i < Items.Count; i++)
+        {
+            <span>@(i % LabelEvery == 0 ? Items[i].Name : "")</span>
+        }
+    </div>
+}
+
+@code {
+    private string Tip(NamedValue item) =>
+        item.Detail is null ? $"{item.Name}: {item.Value.ToString(Format)}" : $"{item.Name}: {item.Value.ToString(Format)} ({item.Detail})";
+
+    [Parameter] public IReadOnlyList<NamedValue> Items { get; set; } = Array.Empty<NamedValue>();
+    [Parameter] public int Height { get; set; } = 140;
+    [Parameter] public int LabelEvery { get; set; } = 1;
+    [Parameter] public string Format { get; set; } = "N0";
+    [Parameter] public string? Highlight { get; set; }
+    [Parameter] public string Empty { get; set; } = "No data yet.";
+}

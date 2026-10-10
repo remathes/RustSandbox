@@ -1,0 +1,324 @@
+@page "/s/{Id:int}"
+@inherits ServerPageBase
+@inject StatsService Stats
+@inject SkillsService SkillsApi
+@inject LiveWorldStore World
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<PageTitle>@(Server?.Name ?? "Server") · Dashboard</PageTitle>
+
+@if (NotFound)
+{
+    <div class="page"><div class="empty"><h3>Server not found</h3><a class="btn" href="/">All servers</a></div></div>
+}
+else if (Server is not null)
+{
+    var metrics = Runtime.Metrics.Snapshot();
+    var info = Runtime.Info;
+    <div class="page">
+        @if (Server.IsDemo)
+        {
+            <div class="callout" style="margin-bottom:var(--gap)">
+                You're looking at a simulated server so every screen has data. <a href="servers/new">Add your own server</a> when you're ready — the demo can be deleted from its settings.
+            </div>
+        }
+        else if (!Runtime.IsOnline && Runtime.State == ConnectionState.Error)
+        {
+            <div class="callout bad" style="margin-bottom:var(--gap)">
+                <b>Can't reach the server.</b> @Runtime.LastError <a href="s/@Id/settings?tab=network">Check connection settings</a>
+            </div>
+        }
+
+        <div class="gauges">
+            <div class="gauge">
+                <div class="val">@(info?.Players ?? 0)<small>/@(info?.MaxPlayers ?? Server.Settings.MaxPlayers)</small></div>
+                <div class="lbl">players online</div>
+                <Sparkline Values="metrics.Select(m => (double)m.Players).ToList()" Min="0" Color="var(--patina)" />
+            </div>
+            <div class="gauge">
+                <div class="val @FpsClass(info?.Framerate)">@(info?.Framerate.ToString("0") ?? "—")</div>
+                <div class="lbl">server FPS</div>
+                <Sparkline Values="metrics.Select(m => m.Fps).ToList()" Min="0" Color="var(--hazard)" />
+            </div>
+            <div class="gauge">
+                <div class="val">@(info is null ? "—" : Fmt.Num(info.EntityCount))</div>
+                <div class="lbl">entities</div>
+                <Sparkline Values="metrics.Select(m => (double)m.Entities).ToList()" Color="var(--sky)" />
+            </div>
+            <div class="gauge">
+                <div class="val">@(_stats?.PvpKills ?? 0)</div>
+                <div class="lbl">PvP kills · 24h</div>
+                <div class="foot">@(_stats?.PlayerDeaths ?? 0) player deaths</div>
+            </div>
+            <div class="gauge">
+                <div class="val">@((_stats?.HeadshotRate ?? 0).ToString("P0"))</div>
+                <div class="lbl">headshot kills · 24h</div>
+                <div class="foot">avg @((_stats?.AvgPvpDistance ?? 0).ToString("0")) m kill distance</div>
+            </div>
+            <div class="gauge">
+                <div class="val">@(Server.LastWipeUtc is { } w ? Fmt.Duration(DateTime.UtcNow - w) : "—")</div>
+                <div class="lbl">since last wipe</div>
+                <div class="foot ellipsis" title="@_nextTask">@(_nextTask ?? "No scheduled tasks")</div>
+            </div>
+        </div>
+
+        <div class="grid g-main mt">
+            <div class="stack">
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Live map</h2>
+                        <span class="spacer"></span>
+                        <select class="input" style="width:auto;min-height:30px;padding:3px 8px" @bind="_mapLayer" aria-label="Heat layer">
+                            <option value="Presence">Where players are (last hour)</option>
+                            <option value="PvpKills">PvP kills (24 h)</option>
+                            <option value="Deaths">Deaths (24 h)</option>
+                        </select>
+                        <a class="btn sm" href="s/@Id/map">Full map</a>
+                    </div>
+                    <div class="panel-body">
+                        @{ var mapImage = MapImages.Resolve(Server); }
+                        <LiveMapView ServerId="Id" Seed="Server.Settings.Seed" WorldSize="Server.Settings.WorldSize" MapImageUrl="@mapImage?.Url" MapImageMargin="MapImages.ManualMargin(Server, mapImage)"
+                                     Layer="_mapLayer" FromUtc="MapFrom" Style="width:min(100%,620px)" OnPlayer="OpenPlayer" />
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Performance</h2><span class="spacer"></span><span class="hint">last hour · updates every 5 s</span></div>
+                    <div class="panel-body">
+                        <LineChart AriaLabel="Server FPS and player count over the last hour"
+                                   Series="@(new List<LineChart.ChartSeries> {
+                                       new("Server FPS", "#e3b341", metrics.Select(m => m.Fps).ToList()),
+                                       new("Players", "#55a892", metrics.Select(m => (double)m.Players).ToList()) })"
+                                   XLabels="@(metrics.Select(m => Fmt.Local(m.Time, "HH:mm")).ToList())" />
+                        @if (info is not null)
+                        {
+                            <dl class="kv" style="margin-top:12px;grid-template-columns:auto 1fr auto 1fr">
+                                <dt>Memory</dt><dd>@Fmt.Bytes(info.Memory * 1024d * 1024d)</dd>
+                                <dt>Network</dt><dd>↓ @Fmt.Bytes(info.NetworkIn)/s · ↑ @Fmt.Bytes(info.NetworkOut)/s</dd>
+                                <dt>Game time</dt><dd>@info.GameTime</dd>
+                                <dt>Version</dt><dd>@info.Protocol</dd>
+                            </dl>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Last 24 hours of combat</h2>
+                        <span class="spacer"></span>
+                        <a class="btn sm" href="s/@Id/combat">Full stats</a>
+                    </div>
+                    <div class="panel-body">
+                        @if (_stats is null)
+                        {
+                            <div class="muted">Loading…</div>
+                        }
+                        else
+                        {
+                            <div class="grid g-2">
+                                <div>
+                                    <h3 style="margin-bottom:10px">Deadliest weapons</h3>
+                                    <BarList Items="_stats.Weapons.Select(w => new NamedValue(w.Weapon, w.Kills)).ToList()" Take="7" Empty="No kills reported in the last 24 hours." />
+                                </div>
+                                <div>
+                                    <h3 style="margin-bottom:10px">What's killing players</h3>
+                                    <BarList Items="_stats.DeathCauses" Take="7" Color="var(--signal)" Empty="No deaths reported in the last 24 hours." />
+                                </div>
+                                <div>
+                                    <h3 style="margin-bottom:10px">Kill distance</h3>
+                                    <ColumnChart Items="_stats.DistanceBuckets" Height="110" />
+                                </div>
+                                <div>
+                                    <h3 style="margin-bottom:10px">What players hunt</h3>
+                                    <BarList Items="_stats.VictimBreakdown" Take="7" Color="var(--hazard)" Empty="Nothing hunted yet." />
+                                </div>
+                            </div>
+                            @if (_stats.LongestKill is { } lk)
+                            {
+                                <p class="dim" style="margin:16px 0 0">
+                                    Longest shot today: <b>@lk.KillerName</b> dropped <b>@lk.VictimName</b> from <b class="accent">@lk.Distance.ToString("0") m</b> with the @(lk.Weapon + (lk.IsHeadshot ? " — headshot" : "")).
+                                </p>
+                            }
+                        }
+                    </div>
+                </section>
+            </div>
+
+            <div class="stack">
+                <ServerControls Server="Server" />
+
+                @if (_me is not null)
+                {
+                    <section class="panel">
+                        <div class="panel-head"><h2>You, last 24 hours</h2><span class="spacer"></span><a class="btn sm" href="s/@Id/combat?player=@_me.SteamId">Details</a></div>
+                        <div class="panel-body">
+                            <div class="duel">
+                                <div><span>K/D</span><b>@_me.Kills / @_me.Deaths</b></div>
+                                <div><span>Favourite weapon</span><b class="ellipsis">@(string.IsNullOrEmpty(_me.FavWeapon) ? "—" : _me.FavWeapon)</b></div>
+                                <div><span>Most killed by</span><b class="ellipsis">@(_me.KilledBy.FirstOrDefault()?.Name ?? "—")</b></div>
+                                <div><span>Longest kill</span><b>@(_me.LongestKill?.Distance.ToString("0") ?? "0") m</b></div>
+                            </div>
+                        </div>
+                    </section>
+                }
+
+                @if (_skillsTop is { Count: > 0 } || _skills?.EventOn == true)
+                {
+                    <section class="panel">
+                        <div class="panel-head">
+                            <h2>Top skills</h2>
+                            @if (_skills?.EventOn == true)
+                            {
+                                <span class="badge rust" title="XP event running">@(_skills.XpRate.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture))x XP@(_skills.XpMinutesLeft is { } m ? $" · {(m >= 120 ? $"{m / 60:0}h" : $"{m:0}m")} left" : "")</span>
+                            }
+                            <span class="spacer"></span>
+                            <a class="btn sm" href="s/@Id/skills">Skills</a>
+                        </div>
+                        <div class="panel-body flush">
+                            <table class="table">
+                                <tbody>
+                                    @foreach (var p in _skillsTop ?? new())
+                                    {
+                                        var best = p.Skills.OrderByDescending(kv => kv.Value.Level).FirstOrDefault();
+                                        <tr class="clickable" @onclick='() => Nav.NavigateTo($"s/{Id}/skills?player={p.Id}")'>
+                                            <td class="ellipsis" style="max-width:150px">@if (p.Online) {<span class="online-dot" title="Online"></span>}@p.Name</td>
+                                            <td class="muted ellipsis">@(best.Key is null ? "" : $"{SkillsService.SkillName(best.Key)} {best.Value.Level}")</td>
+                                            <td class="r num">Lv @p.Total</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                }
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Kill feed</h2><span class="spacer"></span><span class="hint">live</span></div>
+                    <div class="panel-body flush">
+                        <KillFeed Items="_feed" WorldSize="Server.Settings.WorldSize" OnPlayer="OpenPlayer" />
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Online now</h2><span class="spacer"></span><a class="btn sm" href="s/@Id/players">All players</a></div>
+                    <div class="panel-body flush">
+                        @if (Runtime.Players.Count == 0)
+                        {
+                            <div class="empty">@(Runtime.IsOnline ? "Nobody's online." : "Player list appears once RCON is connected.")</div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <tbody>
+                                    @foreach (var p in Runtime.Players.OrderByDescending(p => p.ConnectedSeconds).Take(8))
+                                    {
+                                        <tr class="clickable" @onclick="() => OpenPlayer(p.SteamId)">
+                                            <td class="ellipsis" style="max-width:160px">@p.Name</td>
+                                            <td class="r muted">@Fmt.Duration(TimeSpan.FromSeconds(p.ConnectedSeconds))</td>
+                                            <td class="r num @(p.Ping > 150 ? "warn" : "")">@p.Ping ms</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private CombatStats? _stats;
+    private PlayerStats? _me;
+    private List<KillEvent> _feed = new();
+    private string? _nextTask;
+    private DateTime _statsLoaded;
+    private HeatLayer _mapLayer = HeatLayer.Presence;
+    private DateTime _mapFromBase = DateTime.UtcNow;
+    // Stable per layer so the map doesn't reload its heat layer on every render.
+    private DateTime? MapFrom => _mapLayer == HeatLayer.Presence ? _mapFromBase.AddHours(-1) : _mapFromBase.AddHours(-24);
+
+    protected override async Task OnServerChangedAsync()
+    {
+        await LoadStatsAsync();
+        await LoadNextTaskAsync();
+        await LoadSkillsAsync();
+    }
+
+    private SkillsSummary? _skills;
+    private List<SkillsPlayer>? _skillsTop;
+
+    /// <summary>Top players from the Skills plugin; stays hidden when the plugin isn't there.</summary>
+    private async Task LoadSkillsAsync()
+    {
+        if (Server is null || Server.IsDemo || !Runtime.IsOnline) { _skills = null; _skillsTop = null; return; }
+        _skills = await SkillsApi.SummaryAsync(Id);
+        _skillsTop = _skills is null ? null : await SkillsApi.TopAsync(Id, 5);
+    }
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Live.KillRecorded += OnKill;
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        if (Server is null) return;
+        var from = DateTime.UtcNow.AddHours(-24);
+        _stats = await Stats.GetServerStatsAsync(Id, from);
+        _statsLoaded = DateTime.UtcNow;
+        _feed = World.RecentKills(Id, 15).Concat(_stats.Recent)
+            .DistinctBy(k => k.Id)
+            .OrderByDescending(k => k.Timestamp)
+            .Take(15)
+            .ToList();
+
+        var mySteamId = await Servers.GetAppSettingAsync("MySteamId");
+        _me = string.IsNullOrWhiteSpace(mySteamId) ? null : await Stats.GetPlayerStatsAsync(Id, mySteamId.Trim(), from);
+        if (_me is { Kills: 0, Deaths: 0 }) _me = null;
+    }
+
+    private async Task LoadNextTaskAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var next = await db.Schedules.AsNoTracking()
+            .Where(t => t.ServerId == Id && t.Enabled && t.NextRunUtc != null)
+            .OrderBy(t => t.NextRunUtc)
+            .FirstOrDefaultAsync();
+        _nextTask = next is null ? null : $"Next: {next.Name} {Fmt.Local(next.NextRunUtc!.Value, "ddd HH:mm")}";
+    }
+
+    private void OnKill(int serverId, KillEvent k)
+    {
+        if (serverId != Id) return;
+        _ = InvokeAsync(() =>
+        {
+            _feed.Insert(0, k);
+            if (_feed.Count > 15) _feed.RemoveRange(15, _feed.Count - 15);
+        });
+        RequestRefresh();
+    }
+
+    protected override async Task OnLiveRefreshAsync()
+    {
+        if (DateTime.UtcNow - _statsLoaded > TimeSpan.FromSeconds(30))
+        {
+            _statsLoaded = DateTime.UtcNow;
+            var from = DateTime.UtcNow.AddHours(-24);
+            _stats = await Stats.GetServerStatsAsync(Id, from);
+        }
+        StateHasChanged();
+    }
+
+    private static string FpsClass(double? fps) => fps is null ? "" : fps < 15 ? "bad" : fps < 30 ? "warn" : "";
+
+    private void OpenPlayer(string steamId) => Nav.NavigateTo($"s/{Id}/players?player={steamId}");
+
+    public override void Dispose()
+    {
+        Live.KillRecorded -= OnKill;
+        base.Dispose();
+    }
+}

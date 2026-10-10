@@ -1,0 +1,188 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject ServerService Servers
+@inject ServerConnectionManager Conn
+@inject LiveEvents Live
+@inject ServerContext Ctx
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<div class="shell @(_navOpen ? "nav-open" : "")">
+    <aside class="rail" aria-label="Main navigation">
+        <a class="brand" href="/">
+            <BrandMark />
+            <div class="brand-name">Rust Sandbox<small>@ServerCountLabel</small></div>
+        </a>
+
+        <div class="switcher">
+            <button class="switcher-btn" @onclick="() => _switcherOpen = !_switcherOpen" aria-expanded="@(_switcherOpen ? "true" : "false")" aria-haspopup="listbox">
+                @if (Current is not null)
+                {
+                    <span class="lamp @LampClass(Current.Id)"></span>
+                    <span class="ellipsis">@Current.Name</span>
+                }
+                else
+                {
+                    <span class="dim">Choose a server</span>
+                }
+                <span class="chev">▾</span>
+            </button>
+            @if (_switcherOpen)
+            {
+                <div class="switcher-menu" role="listbox">
+                    @foreach (var s in _servers)
+                    {
+                        <button class="switcher-item @(s.Id == Ctx.ServerId ? "active" : "")" role="option" aria-selected="@(s.Id == Ctx.ServerId ? "true" : "false")" @onclick="() => SwitchTo(s.Id)">
+                            <span class="server-chip" style="background:@s.Color"></span>
+                            <span class="ellipsis">@s.Name</span>
+                            <small>@PlayersLabel(s.Id)</small>
+                        </button>
+                    }
+                    <button class="switcher-item" @onclick='() => Go("servers/new")'>
+                        <Icon Name="plus" Class="dim" />
+                        <span>Add a server</span>
+                    </button>
+                </div>
+            }
+        </div>
+
+        @if (Current is { } current)
+        {
+            // Capture the server: link contents render later, after Current may have changed.
+            var b = $"s/{current.Id}";
+            var playerCount = Conn.Get(current.Id).Players.Count;
+            <NavLink class="nav-link" href="@b" Match="NavLinkMatch.All" @onclick="CloseNav"><Icon Name="dashboard" /> Dashboard</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/console")" @onclick="CloseNav"><Icon Name="console" /> Console</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/players")" @onclick="CloseNav"><Icon Name="players" /> Players <span class="badge">@playerCount</span></NavLink>
+            <NavLink class="nav-link" href="@($"{b}/map")" @onclick="CloseNav"><Icon Name="map" /> Live map</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/combat")" @onclick="CloseNav"><Icon Name="combat" /> Combat stats</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/gathering")" @onclick="CloseNav"><Icon Name="gather" /> Gathering</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/skills")" @onclick="CloseNav"><Icon Name="star" /> Skills</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/daily")" @onclick="CloseNav"><Icon Name="dice" /> Daily rewards</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/quests")" @onclick="CloseNav"><Icon Name="quest" /> Quests</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/events")" @onclick="CloseNav"><Icon Name="map" /> Events</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/rates")" @onclick="CloseNav"><Icon Name="sliders" /> Rates &amp; stacks</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/plugins")" @onclick="CloseNav"><Icon Name="plugin" /> Plugins</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/permissions")" @onclick="CloseNav"><Icon Name="user" /> Groups &amp; permissions</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/schedules")" @onclick="CloseNav"><Icon Name="schedule" /> Schedules</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/telemetry")" @onclick="CloseNav"><Icon Name="bolt" /> Telemetry</NavLink>
+            <NavLink class="nav-link" href="@($"{b}/settings")" @onclick="CloseNav"><Icon Name="settings" /> Server settings</NavLink>
+        }
+
+        <div class="nav-group">Manager</div>
+        <NavLink class="nav-link" href="" Match="NavLinkMatch.All" @onclick="CloseNav"><Icon Name="fleet" /> All servers</NavLink>
+        <NavLink class="nav-link" href="maps" @onclick="CloseNav"><Icon Name="seed" /> Map generator</NavLink>
+
+        <div class="rail-foot">
+            <button class="nav-link" @onclick="() => _palette?.Open()"><Icon Name="search" /> Jump to… <kbd style="margin-left:auto">Ctrl K</kbd></button>
+            <NavLink class="nav-link" href="preferences" @onclick="CloseNav"><Icon Name="user" /> Preferences</NavLink>
+            <form method="post" action="/account/logout">
+                <AntiforgeryToken />
+                <button class="nav-link" type="submit"><Icon Name="logout" /> Sign out</button>
+            </form>
+        </div>
+    </aside>
+
+    <div class="main">
+        <div class="mobile-bar">
+            <button class="btn icon ghost" @onclick="() => _navOpen = !_navOpen" aria-label="Menu"><Icon Name="menu" /></button>
+            <BrandMark />
+            <span class="ellipsis">@(Current?.Name ?? "Rust Sandbox")</span>
+        </div>
+        @if (Current is not null && OnServerPage)
+        {
+            <ServerPlate ServerId="Current.Id" />
+        }
+        @Body
+    </div>
+</div>
+
+<CommandPalette @ref="_palette" Servers="_servers" />
+<ToastHost />
+
+@code {
+    private List<ServerInstance> _servers = new();
+    private bool _switcherOpen;
+    private bool _navOpen;
+    private CommandPalette? _palette;
+    private int _refreshQueued;
+
+    private ServerInstance? Current => _servers.FirstOrDefault(s => s.Id == Ctx.ServerId);
+    private int OnlineCount => _servers.Count(s => Conn.Get(s.Id).IsOnline);
+    private string ServerCountLabel => $"{_servers.Count} server{(_servers.Count == 1 ? "" : "s")} · {OnlineCount} online";
+    private bool OnServerPage => Nav.ToBaseRelativePath(Nav.Uri).StartsWith("s/", StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _servers = await Servers.GetAllAsync();
+        Ctx.Changed += OnContextChanged;
+        Live.ServersChanged += OnServersChanged;
+        Live.StatusChanged += OnStatusChanged;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private string LampClass(int id) => Conn.Get(id).State switch
+    {
+        ConnectionState.Online => "online",
+        ConnectionState.Connecting => "connecting",
+        ConnectionState.Error => "error",
+        _ => "",
+    };
+
+    private string PlayersLabel(int id)
+    {
+        var rt = Conn.Get(id);
+        return rt.IsOnline && rt.Info is not null ? $"{rt.Info.Players}/{rt.Info.MaxPlayers}" : rt.IsOnline ? "online" : "offline";
+    }
+
+    private void SwitchTo(int id)
+    {
+        _switcherOpen = false;
+        var path = Nav.ToBaseRelativePath(Nav.Uri);
+        var sub = "";
+        if (path.StartsWith("s/"))
+        {
+            var parts = path.Split('/', 3);
+            if (parts.Length == 3) sub = "/" + parts[2].Split('?')[0];
+        }
+        Go($"s/{id}{sub}");
+    }
+
+    private void Go(string url)
+    {
+        _switcherOpen = false;
+        _navOpen = false;
+        Nav.NavigateTo(url);
+    }
+
+    private void CloseNav() => _navOpen = false;
+
+    private void OnContextChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(() => { _switcherOpen = false; StateHasChanged(); });
+
+    private void OnServersChanged() => _ = InvokeAsync(async () =>
+    {
+        _servers = await Servers.GetAllAsync();
+        StateHasChanged();
+    });
+
+    // Status changes arrive every few seconds per server; coalesce them.
+    private void OnStatusChanged(int id)
+    {
+        if (Interlocked.Exchange(ref _refreshQueued, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(1500);
+            Interlocked.Exchange(ref _refreshQueued, 0);
+            try { await InvokeAsync(StateHasChanged); } catch (ObjectDisposedException) { }
+        });
+    }
+
+    public void Dispose()
+    {
+        Ctx.Changed -= OnContextChanged;
+        Live.ServersChanged -= OnServersChanged;
+        Live.StatusChanged -= OnStatusChanged;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

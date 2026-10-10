@@ -1,0 +1,144 @@
+@inject SkillsService SkillsApi
+@inject ToastService Toasts
+
+@* One player's skills from the Skills plugin: levels, perks, what the perks did, and admin tools. Renders nothing when the plugin has no data. *@
+
+@if (_player is not null)
+{
+    <div class="skills-panel">
+        <div class="row" style="gap:8px;margin-bottom:10px">
+            <h3 style="margin:0">Skills</h3>
+            <span class="badge rust">Total level @_player.Total</span>
+            <span class="spacer" style="flex:1"></span>
+            @if (Compact)
+            {
+                <a class="btn sm" href="s/@ServerId/skills?player=@SteamId">Open in Skills</a>
+            }
+        </div>
+        <div class="skill-rows">
+            @foreach (var s in SkillsService.Skills)
+            {
+                var l = _player.Level(s.Id);
+                var frac = l.Next <= 0 ? 1 : Math.Clamp(l.Xp / l.Next, 0, 1);
+                <div class="skill-row">
+                    <img class="item-icon" src="api/servers/@ServerId/item-icon/@s.Icon" alt="" width="26" height="26" style="width:26px;height:26px" loading="lazy" onerror="this.style.visibility='hidden'" />
+                    <span class="name">@s.Name</span>
+                    <span class="lv">Lv @l.Level</span>
+                    <div class="bar-track" title="@(l.Next <= 0 ? "Max level" : $"{l.Xp:N0} / {l.Next:N0} XP")"><div class="bar-fill" style="width:@((frac * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%;background:var(--patina)"></div></div>
+                    <span class="pts @(l.Points > 0 ? "" : "muted")">@(l.Points > 0 ? $"{l.Points} pt" : "")</span>
+                </div>
+            }
+        </div>
+
+        <h4 style="margin:14px 0 8px">Perks</h4>
+        @if (_player.Perks.Count == 0)
+        {
+            <p class="muted" style="margin:0">No perks unlocked yet.</p>
+        }
+        else
+        {
+            <div class="perk-chips">
+                @foreach (var (id, rank) in _player.Perks.OrderBy(kv => Array.FindIndex(SkillsService.Perks, p => p.Id == kv.Key)))
+                {
+                    var info = SkillsService.Perk(id);
+                    <span class="perk-chip" title="@(info is null ? id : SkillsService.SkillName(info.Skill))">
+                        <b>@(info?.Name ?? id)</b> <span class="muted">rank @rank</span>
+                        @if (_player.Totals.TryGetValue(id, out var done) && done > 0)
+                        {
+                            <span class="done">· @TotalText(id, done)</span>
+                        }
+                    </span>
+                }
+            </div>
+        }
+
+        @if (ShowAdmin)
+        {
+            <h4 style="margin:16px 0 8px">Admin</h4>
+            <div class="row" style="gap:6px;flex-wrap:wrap">
+                <select class="input" style="width:auto" @bind="_grantSkill" aria-label="Skill">
+                    @foreach (var s in SkillsService.Skills)
+                    {
+                        <option value="@s.Id">@s.Name</option>
+                    }
+                </select>
+                <input class="input" style="width:100px" type="number" min="1" step="100" @bind="_grantAmount" aria-label="XP amount" />
+                <button class="btn sm" @onclick="GrantAsync" disabled="@_busy">Give XP</button>
+                <span class="spacer" style="flex:1"></span>
+                <button class="btn sm danger" @onclick="() => _confirmReset = true" disabled="@_busy">Reset skills</button>
+            </div>
+        }
+    </div>
+
+    <ConfirmDialog @bind-Visible="_confirmReset" Title="Reset this player's skills?" ConfirmText="Reset" Danger="true" OnConfirm="ResetAsync">
+        <p>@_player.Name loses every level, point and perk in all nine skills. This can't be undone.</p>
+    </ConfirmDialog>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ServerId { get; set; }
+    [Parameter, EditorRequired] public string SteamId { get; set; } = "";
+    /// <summary>Short version for the Players page, with a link to the full Skills page.</summary>
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public bool ShowAdmin { get; set; } = true;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private SkillsPlayer? _player;
+    private string? _loaded;
+    private string _grantSkill = "mining";
+    private double _grantAmount = 500;
+    private bool _busy, _confirmReset;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{ServerId}:{SteamId}";
+        if (_loaded == key) return;
+        _loaded = key;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync() => _player = await SkillsApi.PlayerAsync(ServerId, SteamId);
+
+    private async Task GrantAsync()
+    {
+        if (_grantAmount <= 0) return;
+        _busy = true;
+        try
+        {
+            var reply = await SkillsApi.GiveXpAsync(ServerId, SteamId, _grantSkill, _grantAmount);
+            if (reply is null) Toasts.Error("The server is offline.");
+            else if (reply.StartsWith("Usage", StringComparison.OrdinalIgnoreCase)) Toasts.Error(reply);
+            else Toasts.Success($"Gave {_grantAmount:N0} {SkillsService.SkillName(_grantSkill)} XP. {reply.Trim()}");
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await SkillsApi.ResetPlayerAsync(ServerId, SteamId);
+            if (reply is null) Toasts.Error("The server is offline.");
+            else Toasts.Success(reply.Trim());
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    public static string TotalText(string perk, double total) => perk switch
+    {
+        "craftsman" or "greenthumb" => total >= 3600 ? $"{total / 3600:0.#}h saved" : total >= 60 ? $"{total / 60:0}m saved" : $"{total:0}s saved",
+        "luckystrike" or "bigcatch" => $"{total:N0}×",
+        "bargain" or "techdiscount" => $"{total:N0} scrap",
+        "fuelsaver" => $"{total:0.#} fuel",
+        "toolcare" => $"{total:0.#} durability",
+        "thickskin" or "toughframe" => $"{total:N0} blocked",
+        "fieldmedic" or "regeneration" or "quickfix" => $"+{total:N0} health",
+        "ironstomach" => $"{total:N0} food/water",
+        _ => $"+{total:N0}",
+    };
+}

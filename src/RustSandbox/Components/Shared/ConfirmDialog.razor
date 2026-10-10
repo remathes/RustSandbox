@@ -1,0 +1,56 @@
+@* Modal confirmation. Set RequireText to make people type something (e.g. the server name) before a destructive action. *@
+@if (Visible)
+{
+    <div class="backdrop" @onclick="Cancel">
+        <div class="modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="modal-head"><h2>@Title</h2></div>
+            <div class="modal-body">
+                @ChildContent
+                @if (!string.IsNullOrEmpty(RequireText))
+                {
+                    <label class="field" style="margin-top:12px">
+                        <span>Type <b>@RequireText</b> to confirm</span>
+                        <input class="input" @bind="_typed" @bind:event="oninput" autocomplete="off" />
+                    </label>
+                }
+            </div>
+            <div class="modal-foot">
+                <button class="btn ghost" @onclick="Cancel">Cancel</button>
+                <button class="btn @(Danger ? "danger" : "primary")" disabled="@(!CanConfirm || _busy)" @onclick="Confirm">@ConfirmText</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public string Title { get; set; } = "Are you sure?";
+    [Parameter] public string ConfirmText { get; set; } = "Confirm";
+    [Parameter] public bool Danger { get; set; }
+    [Parameter] public string? RequireText { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnConfirm { get; set; }
+
+    private string _typed = "";
+    private bool _busy;
+    private bool CanConfirm => string.IsNullOrEmpty(RequireText) || string.Equals(_typed.Trim(), RequireText, StringComparison.OrdinalIgnoreCase);
+
+    protected override void OnParametersSet()
+    {
+        if (!Visible) _typed = "";
+    }
+
+    private async Task Cancel() => await VisibleChanged.InvokeAsync(false);
+
+    private async Task Confirm()
+    {
+        _busy = true;
+        try
+        {
+            await VisibleChanged.InvokeAsync(false);
+            await OnConfirm.InvokeAsync();
+        }
+        finally { _busy = false; }
+    }
+}

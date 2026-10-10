@@ -1,0 +1,422 @@
+@page "/s/{Id:int}/daily"
+@inherits ServerPageBase
+@inject DailyService DailyApi
+@inject TweaksService Tweaks
+@using System.Globalization
+@using System.Text.Json.Nodes
+
+<PageTitle>@(Server?.Name ?? "Server") · Daily rewards</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Daily rewards</h1>
+                <p>One spin a day for a random item, weighted by rarity tier. Players get a popup when they wake up, or type <code>/daily</code>.</p>
+            </div>
+            @if (_summary is not null)
+            {
+                <span class="badge good">Plugin v@(_summary.Version)</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="RefreshAsync" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (Runtime.IsOnline && _summary is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The Daily rewards plugin didn't answer. Install it from <a href="s/@Id/telemetry">Telemetry → Daily rewards</a>, then refresh.</div>
+        }
+
+        @if (_summary is not null)
+        {
+            var top = _summary.Streaks.FirstOrDefault();
+            <div class="duel" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:var(--gap)">
+                <div><span class="muted">Claimed today</span><b>@_summary.ClaimsToday <span class="muted" style="font-size:14px">of @_summary.Players players</span></b></div>
+                <div><span class="muted">Next reset in</span><b>@Span(_summary.NextResetMinutes)</b></div>
+                <div><span class="muted">Longest streak</span><b class="ellipsis">@(top is null ? "—" : $"{top.Name} · {top.Streak} days")</b></div>
+                <div><span class="muted">Spins this wipe</span><b>@_summary.History.Count@(_summary.History.Count >= 100 ? "+" : "")</b></div>
+            </div>
+        }
+
+        <div class="tabs" role="tablist">
+            <button role="tab" class="@(_tab == "rewards" ? "on" : "")" @onclick="OpenRewardsAsync">Rewards</button>
+            <button role="tab" class="@(_tab == "winners" ? "on" : "")" @onclick='() => _tab = "winners"'>Winners &amp; streaks</button>
+        </div>
+
+        @if (_tab == "rewards")
+        {
+            @if (_configError is not null)
+            {
+                <div class="callout warn">@_configError</div>
+            }
+            else if (_config is not null)
+            {
+                var tiers = Tiers();
+                var totalChance = tiers.Sum(t => Num(t, "Chance (relative)"));
+                <div class="row" style="margin-bottom:var(--gap)">
+                    <p class="muted" style="margin:0;flex:1">Each spin picks a tier by its chance, then an item from that tier by weight, then an amount between min and max. Saving reloads the plugin; today's claims are kept.</p>
+                    @if (_dirty)
+                    {
+                        <button class="btn ghost" @onclick="OpenRewardsAsync" disabled="@_busy">Discard</button>
+                    }
+                    <button class="btn primary" @onclick="SaveAsync" disabled="@(_busy || !_dirty)"><Icon Name="save" /> Save &amp; reload</button>
+                </div>
+
+                <section class="panel" style="margin-bottom:var(--gap)">
+                    <div class="panel-head"><h2>Settings</h2></div>
+                    <div class="panel-body form-grid">
+                        <label class="field">
+                            <span>Day resets at (server time)</span>
+                            <input class="input" type="time" value="@Str(_config, "Day resets at (server time, HH:mm)")" @onchange="e => SetStr(_config, ResetKey, e)" />
+                        </label>
+                        <label class="field">
+                            <span>Spin length (seconds)</span>
+                            <input class="input" type="number" min="2" max="15" step="0.5" value="@F(Num(_config, "Spin length (seconds)"))" @onchange="e => SetNum(_config, SpinKey, e)" />
+                        </label>
+                        <label class="field">
+                            <span>Streak bonus every N days (0 = off)</span>
+                            <input class="input" type="number" min="0" max="60" step="1" value="@F(Num(_config, StreakDaysKey))" @onchange="e => SetNum(_config, StreakDaysKey, e)" />
+                        </label>
+                        <label class="field">
+                            <span>Streak bonus guarantees at least</span>
+                            <select class="input" value="@Str(_config, "Streak: guaranteed tier")" @onchange="e => SetStr(_config, StreakTierKey, e)">
+                                @foreach (var t in tiers)
+                                {
+                                    <option value="@Str(t, "Name")">@Str(t, "Name")</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="check wide">
+                            <input type="checkbox" checked="@Bool(_config, "Show the reward popup when a player wakes up")" @onchange="e => SetBool(_config, PopupKey, e)" />
+                            <span>Show the reward popup when a player wakes up (once a day)</span>
+                        </label>
+                        <label class="check wide">
+                            <input type="checkbox" checked="@Bool(_config, "Reset streaks on map wipe")" @onchange="e => SetBool(_config, WipeKey, e)" />
+                            <span>Reset streaks on map wipe</span>
+                        </label>
+                    </div>
+                </section>
+
+                @foreach (var tier in tiers)
+                {
+                    var items = TierItems(tier);
+                    var chance = Num(tier, "Chance (relative)");
+                    var totalWeight = items.Sum(i => Num(i, "Weight"));
+                    <section class="panel" style="margin-bottom:var(--gap);border-left:4px solid @DailyService.ToHex(Str(tier, "Color (r g b)"))">
+                        <div class="panel-head" style="flex-wrap:wrap">
+                            <input class="input" style="width:150px;font-weight:600" value="@Str(tier, "Name")" @onchange="e => SetStr(tier, NameKey, e)" aria-label="Tier name" />
+                            <input type="color" value="@DailyService.ToHex(Str(tier, "Color (r g b)"))" @onchange="e => SetColor(tier, e)" title="Tier colour" style="width:36px;height:30px;border:0;background:none" />
+                            <label class="row" style="gap:6px">
+                                <span class="muted">Chance</span>
+                                <input class="input" style="width:80px" type="number" min="0" step="any" value="@F(chance)" @onchange="e => SetNum(tier, ChanceKey, e)" />
+                                <b>@(totalChance > 0 ? (chance / totalChance * 100).ToString("0.#", CultureInfo.InvariantCulture) : "0")%</b>
+                            </label>
+                            <label class="check" style="margin:0">
+                                <input type="checkbox" checked="@Bool(tier, "Announce wins to everyone")" @onchange="e => SetBool(tier, AnnounceKey, e)" />
+                                <span>Announce wins</span>
+                            </label>
+                            <span class="spacer"></span>
+                            <span class="hint">@items.Count item(s)</span>
+                            <button class="btn sm danger" @onclick="() => RemoveTier(tier)" title="Remove this tier"><Icon Name="trash" /></button>
+                        </div>
+                        <div class="panel-body flush table-wrap">
+                            <table class="table">
+                                <thead><tr><th>Item</th><th style="width:110px">Min</th><th style="width:110px">Max</th><th style="width:150px">Weight</th><th style="width:44px"></th></tr></thead>
+                                <tbody>
+                                    @foreach (var item in items)
+                                    {
+                                        var shortName = Str(item, "Item");
+                                        var weight = Num(item, "Weight");
+                                        <tr>
+                                            <td>
+                                                <span class="item-cell">
+                                                    <img class="item-icon" src="api/servers/@Id/item-icon/@shortName" alt="" width="32" height="32" loading="lazy" onerror="this.style.visibility='hidden'" />
+                                                    <span>@NameOf(shortName) <span class="muted" style="font-size:12px">@shortName</span>@if (!Known(shortName)) {<span class="badge warn" style="margin-left:6px">unknown item</span>}</span>
+                                                </span>
+                                            </td>
+                                            <td><input class="input" type="number" min="1" step="1" value="@F(Num(item, "Min"))" @onchange="e => SetInt(item, MinKey, e)" /></td>
+                                            <td><input class="input" type="number" min="1" step="1" value="@F(Num(item, "Max"))" @onchange="e => SetInt(item, MaxKey, e)" /></td>
+                                            <td>
+                                                <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                                    <input class="input" style="width:70px" type="number" min="0" step="any" value="@F(weight)" @onchange="e => SetNum(item, WeightKey, e)" />
+                                                    <span class="muted" style="font-size:12px">@(totalWeight > 0 ? (weight / totalWeight * 100).ToString("0.#", CultureInfo.InvariantCulture) : "0")%</span>
+                                                </div>
+                                            </td>
+                                            <td><button class="btn sm ghost" title="Remove" @onclick="() => RemoveItem(tier, item)"><Icon Name="trash" /></button></td>
+                                        </tr>
+                                    }
+                                    <tr>
+                                        <td colspan="5">
+                                            <div class="row" style="gap:6px">
+                                                <input class="input" style="width:280px" list="daily-items" placeholder="Add an item: type a name or shortname" @bind="_newItem[TierKey(tier)]" />
+                                                <button class="btn sm" @onclick="() => AddItem(tier)">Add</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                }
+                <button class="btn" @onclick="AddTier"><Icon Name="plus" /> Add a tier</button>
+
+                <datalist id="daily-items">
+                    @foreach (var i in _items)
+                    {
+                        <option value="@i.Short">@i.Name</option>
+                    }
+                </datalist>
+            }
+        }
+        else if (_tab == "winners")
+        {
+            <div class="grid" style="grid-template-columns:minmax(0,1fr) minmax(260px,340px)">
+                <section class="panel">
+                    <div class="panel-head"><h2>Recent spins</h2><span class="spacer"></span><span class="hint">newest first</span></div>
+                    <div class="panel-body flush table-wrap">
+                        @if (_summary is null || _summary.History.Count == 0)
+                        {
+                            <div class="empty">@(_summary is null ? (Runtime.IsOnline ? "No data from the plugin." : "Start the server to see the winners.") : "Nobody has spun yet.")</div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead><tr><th>When</th><th>Player</th><th>Won</th><th>Tier</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var w in _summary.History)
+                                    {
+                                        <tr>
+                                            <td class="muted" title="@w.At.ToLocalTime().ToString("g")">@Fmt.Ago(w.At)</td>
+                                            <td class="ellipsis" style="max-width:160px">@w.Name</td>
+                                            <td><span class="item-cell"><img class="item-icon" src="api/servers/@Id/item-icon/@w.Item" alt="" width="32" height="32" loading="lazy" onerror="this.style.visibility='hidden'" /><span>@w.Amount× @w.ItemName</span></span></td>
+                                            <td><span class="badge" style="background:@TierColor(w.Tier)33;color:@TierColor(w.Tier)">@w.Tier</span></td>
+                                            <td class="r">
+                                                @if (w.At.ToLocalTime().Date == DateTime.Now.Date)
+                                                {
+                                                    <button class="btn sm ghost" title="Let them spin again today" @onclick="() => ResetAsync(w)">Spin again</button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h2>Longest streaks</h2></div>
+                    <div class="panel-body flush">
+                        @if (_summary is null || _summary.Streaks.Count == 0)
+                        {
+                            <div class="empty">No streaks yet.</div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <tbody>
+                                    @foreach (var s in _summary.Streaks)
+                                    {
+                                        <tr><td class="ellipsis" style="max-width:160px">@s.Name</td><td class="r num">@s.Streak days</td><td class="r muted">@s.Claims spins</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private const string ResetKey = "Day resets at (server time, HH:mm)";
+    private const string SpinKey = "Spin length (seconds)";
+    private const string StreakTierKey = "Streak: guaranteed tier";
+    private const string PopupKey = "Show the reward popup when a player wakes up";
+    private const string WipeKey = "Reset streaks on map wipe";
+    private const string NameKey = "Name";
+    private const string ChanceKey = "Chance (relative)";
+    private const string AnnounceKey = "Announce wins to everyone";
+    private const string MinKey = "Min";
+    private const string MaxKey = "Max";
+    private const string WeightKey = "Weight";
+    private const string StreakDaysKey = "Streak: every N days in a row guarantees at least the tier below (0 = off)";
+
+    private string _tab = "rewards";
+    private bool _busy, _loaded, _dirty;
+    private DailySummary? _summary;
+    private JsonObject? _config;
+    private string? _configError;
+    private List<RustItem> _items = new();
+    private Dictionary<string, RustItem> _itemsByShort = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _newItem = new();
+
+    protected override async Task OnServerChangedAsync()
+    {
+        await RefreshAsync();
+        await OpenRewardsAsync();
+        if (Server is not null)
+        {
+            (_items, _) = await Tweaks.GetItemsAsync(Server);
+            _itemsByShort = _items.GroupBy(i => i.Short, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        try
+        {
+            _summary = Runtime.IsOnline ? await DailyApi.SummaryAsync(Id, 100) : null;
+            _loaded = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task OpenRewardsAsync()
+    {
+        _tab = "rewards";
+        if (Server is null) return;
+        (_config, _configError) = await DailyService.ReadConfigAsync(Server);
+        _dirty = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Server is null || _config is null) return;
+        _busy = true;
+        try
+        {
+            var err = await DailyApi.SaveConfigAsync(Server, _config);
+            if (err is not null) { Toasts.Error(err); return; }
+            Toasts.Success(Runtime.IsOnline ? "Saved — the plugin reloaded with the new rewards." : "Saved. It applies the next time the server starts.");
+            await OpenRewardsAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetAsync(DailyWin w)
+    {
+        var reply = await DailyApi.ResetClaimAsync(Id, w.Id);
+        if (reply is null) Toasts.Error("The server is offline.");
+        else Toasts.Success(reply.Trim());
+        await RefreshAsync();
+    }
+
+    // ---- config helpers (the plugin's JSON, edited in place)
+
+    private List<JsonObject> Tiers() =>
+        (_config?[DailyService.TiersKey] as JsonArray)?.OfType<JsonObject>().ToList() ?? new();
+
+    private static List<JsonObject> TierItems(JsonObject tier) =>
+        (tier["Items"] as JsonArray)?.OfType<JsonObject>().ToList() ?? new();
+
+    private string TierKey(JsonObject tier)
+    {
+        var key = "t" + Tiers().IndexOf(tier);
+        if (!_newItem.ContainsKey(key)) _newItem[key] = "";
+        return key;
+    }
+
+    private string NameOf(string shortName) => _itemsByShort.TryGetValue(shortName, out var i) ? i.Name : shortName;
+    private bool Known(string shortName) => _itemsByShort.Count == 0 || _itemsByShort.ContainsKey(shortName);
+
+    private string TierColor(string tierName)
+    {
+        var tier = Tiers().FirstOrDefault(t => string.Equals(Str(t, "Name"), tierName, StringComparison.OrdinalIgnoreCase));
+        return tier is null ? "#9aa0a6" : DailyService.ToHex(Str(tier, "Color (r g b)"));
+    }
+
+    private static string Str(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : "";
+
+    private static bool Bool(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
+    private static double Num(JsonObject o, string key)
+    {
+        if (o[key] is not JsonValue v) return 0;
+        if (v.TryGetValue<double>(out var d)) return d;
+        if (v.TryGetValue<int>(out var i)) return i;
+        if (v.TryGetValue<long>(out var l)) return l;
+        if (v.TryGetValue<float>(out var f)) return f;
+        return 0;
+    }
+
+    private void SetStr(JsonObject o, string key, ChangeEventArgs e)
+    {
+        o[key] = e.Value?.ToString() ?? "";
+        _dirty = true;
+    }
+
+    private void SetBool(JsonObject o, string key, ChangeEventArgs e)
+    {
+        o[key] = e.Value is true;
+        _dirty = true;
+    }
+
+    private void SetNum(JsonObject o, string key, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v < 0) return;
+        o[key] = Math.Round(v, 4);
+        _dirty = true;
+    }
+
+    private void SetInt(JsonObject o, string key, ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) || v < 1) return;
+        o[key] = (int)Math.Round(v);
+        if (key == "Min" && Num(o, "Max") < v) o["Max"] = (int)Math.Round(v);
+        if (key == "Max" && Num(o, "Min") > v) o["Min"] = (int)Math.Round(v);
+        _dirty = true;
+    }
+
+    private void SetColor(JsonObject tier, ChangeEventArgs e)
+    {
+        tier["Color (r g b)"] = DailyService.FromHex(e.Value?.ToString() ?? "");
+        _dirty = true;
+    }
+
+    private void AddItem(JsonObject tier)
+    {
+        var key = TierKey(tier);
+        var text = (_newItem[key] ?? "").Trim();
+        if (text.Length == 0) return;
+        // Accept a shortname or a display name from the list.
+        var match = _itemsByShort.ContainsKey(text) ? _itemsByShort[text]
+            : _items.FirstOrDefault(i => string.Equals(i.Name, text, StringComparison.OrdinalIgnoreCase));
+        var shortName = match?.Short ?? text;
+        if (tier["Items"] is not JsonArray list) tier["Items"] = list = new JsonArray();
+        list.Add(new JsonObject { ["Item"] = shortName, ["Min"] = 1, ["Max"] = 1, ["Weight"] = 1.0, ["Skin"] = 0 });
+        _newItem[key] = "";
+        _dirty = true;
+    }
+
+    private void RemoveItem(JsonObject tier, JsonObject item)
+    {
+        if (tier["Items"] is JsonArray list) list.Remove(item);
+        _dirty = true;
+    }
+
+    private void AddTier()
+    {
+        if (_config?[DailyService.TiersKey] is not JsonArray tiers) return;
+        tiers.Add(new JsonObject
+        {
+            ["Name"] = "New tier", ["Chance (relative)"] = 1.0, ["Color (r g b)"] = "0.9 0.6 0.2",
+            ["Announce wins to everyone"] = false, ["Items"] = new JsonArray(),
+        });
+        _dirty = true;
+    }
+
+    private void RemoveTier(JsonObject tier)
+    {
+        if (_config?[DailyService.TiersKey] is JsonArray tiers && tiers.Count > 1) tiers.Remove(tier);
+        _dirty = true;
+    }
+
+    private static string Span(double minutes) => minutes >= 60 ? $"{(int)(minutes / 60)}h {(int)(minutes % 60)}m" : $"{Math.Max(1, (int)minutes)}m";
+    private static string F(double v) => v.ToString("0.####", CultureInfo.InvariantCulture);
+}

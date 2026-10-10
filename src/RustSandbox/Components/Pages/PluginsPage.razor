@@ -1,0 +1,379 @@
+@page "/s/{Id:int}/plugins"
+@inherits ServerPageBase
+@inject PluginService Plugins
+
+<PageTitle>@(Server?.Name ?? "Server") · Plugins</PageTitle>
+
+@if (Server is not null)
+{
+    var files = PluginService.Paths(Server) is not null;
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Plugins</h1>
+                <p>@(Server.Settings.Framework == ModFramework.Vanilla && !Server.IsDemo ? "This server runs vanilla Rust. Pick Oxide or Carbon in Settings → Hosting to use plugins." : $"{Server.Settings.Framework} plugins. Changes load straight away — no restart needed.")</p>
+            </div>
+            @if (_tab == "installed")
+            {
+                <input class="input" style="max-width:220px" placeholder="Filter" @bind="_filter" @bind:event="oninput" />
+                <button class="btn" @onclick="CheckUpdatesAsync" disabled="@_busy">@(_checking ? "Checking uMod…" : "Check for updates")</button>
+                @if (_updates > 0)
+                {
+                    <button class="btn primary" @onclick="UpdateAllAsync" disabled="@_busy"><Icon Name="download" /> Update all (@_updates)</button>
+                }
+            }
+        </div>
+
+        @if (!files)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">
+                @if (Server.IsDemo)
+                {
+                    <span>Demo server: the list below is simulated. On a server this machine runs you can install, configure, disable and update plugins here.</span>
+                }
+                else
+                {
+                    <span>This server isn't run by this machine, so the manager can't reach its plugin files. You can still load, unload and reload plugins over RCON; to install or edit configs, use your host's file manager.</span>
+                }
+            </div>
+        }
+
+        <div class="tabs" role="tablist">
+            <button role="tab" class="@(_tab == "installed" ? "on" : "")" @onclick='() => _tab = "installed"'>Installed (@_list.Count)</button>
+            <button role="tab" class="@(_tab == "umod" ? "on" : "")" @onclick='() => _tab = "umod"'>Get plugins from uMod</button>
+        </div>
+
+        @if (_tab == "installed")
+        {
+            <div class="grid @(_editing is null ? "" : "g-2")">
+                <section class="panel">
+                    <div class="panel-body flush table-wrap">
+                        @if (_loading)
+                        {
+                            <div class="empty">Loading plugins…</div>
+                        }
+                        else if (_list.Count == 0)
+                        {
+                            <div class="empty">
+                                <h3>No plugins yet</h3>
+                                <p>Find one on uMod or upload a .cs file.</p>
+                                <button class="btn" @onclick='() => _tab = "umod"'>Browse uMod</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead><tr><th style="width:52px">On</th><th>Plugin</th><th>Version</th><th>Status</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var p in Filtered())
+                                    {
+                                        <tr style="@(_editing == p.Name ? "background:var(--steel-750)" : "")">
+                                            <td><label class="check"><input type="checkbox" checked="@p.Enabled" @onchange="e => ToggleAsync(p, e)" disabled="@_busy" aria-label="Enabled" /></label></td>
+                                            <td>
+                                                <b>@p.Title</b> <span class="muted" style="font-size:12.5px">by @p.Author</span>
+                                                @if (!string.IsNullOrEmpty(p.Description))
+                                                {
+                                                    <div class="muted ellipsis" style="font-size:12.5px;max-width:420px">@p.Description</div>
+                                                }
+                                            </td>
+                                            <td class="nowrap">
+                                                <span class="num">@p.Version</span>
+                                                @if (p.Update is not null)
+                                                {
+                                                    <button class="btn sm primary" style="margin-left:6px" @onclick="() => UpdateOneAsync(p)" disabled="@_busy">Update to @p.Update.Version</button>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (!p.Enabled)
+                                                {
+                                                    <span class="badge">Disabled</span>
+                                                }
+                                                else if (p.Loaded)
+                                                {
+                                                    <span class="badge good">Loaded</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bad" title="Enabled but not running — check the console for compile errors">Not loaded</span>
+                                                }
+                                            </td>
+                                            <td class="r nowrap">
+                                                <button class="btn sm ghost" @onclick="() => ReloadAsync(p)" disabled="@(_busy || !p.Enabled)" title="Reload">Reload</button>
+                                                @if (files)
+                                                {
+                                                    <button class="btn sm" @onclick="() => OpenConfigAsync(p)" disabled="@(!p.HasConfig)" title="@(p.HasConfig ? "Edit config" : "No config file")">Config</button>
+                                                    <button class="btn sm ghost icon" title="Delete" @onclick="() => { _deleteTarget = p; _deleteOpen = true; }"><Icon Name="trash" /></button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                    @if (files)
+                    {
+                        <div class="row" style="padding:12px 16px;border-top:1px solid var(--steel-750)">
+                            <label class="btn sm" style="cursor:pointer">
+                                <Icon Name="plus" /> Upload .cs file
+                                <InputFile OnChange="UploadAsync" accept=".cs" multiple style="display:none" />
+                            </label>
+                            <span class="muted" style="font-size:13px">Disabled plugins are moved to plugins/disabled so they stay off after restarts.</span>
+                        </div>
+                    }
+                </section>
+
+                @if (_editing is not null)
+                {
+                    <section class="panel">
+                        <div class="panel-head">
+                            <h2>@(_editing + ".json")</h2>
+                            <span class="spacer"></span>
+                            <button class="btn sm ghost" @onclick="Format">Tidy</button>
+                            <button class="btn sm ghost" @onclick="() => _editing = null">✕</button>
+                        </div>
+                        <div class="panel-body stack" style="gap:10px">
+                            <textarea class="input mono" spellcheck="false" style="min-height:520px;font-size:12.5px;line-height:1.5" @bind="_config" @bind:event="oninput"></textarea>
+                            @if (_configError is not null)
+                            {
+                                <div class="callout bad">@_configError</div>
+                            }
+                            <div class="row end">
+                                <span class="muted" style="font-size:13px;margin-right:auto">Saving keeps a .bak copy and reloads the plugin.</span>
+                                <button class="btn ghost" @onclick="() => OpenConfigAsync(_list.First(x => x.Name == _editing))">Revert</button>
+                                <button class="btn primary" @onclick="SaveConfigAsync" disabled="@_busy">Save &amp; reload</button>
+                            </div>
+                        </div>
+                    </section>
+                }
+            </div>
+        }
+        else
+        {
+            <section class="panel">
+                <div class="panel-body stack">
+                    <div class="row" style="flex-wrap:nowrap">
+                        <input class="input" placeholder="Search uMod, e.g. kits, teleport, chat" @bind="_query" @onkeydown="SearchKey" />
+                        <button class="btn primary" @onclick="SearchAsync" disabled="@_busy"><Icon Name="search" /> Search</button>
+                    </div>
+                    @if (_searchError is not null)
+                    {
+                        <div class="callout bad">@_searchError</div>
+                    }
+                    @if (_results is not null && _results.Count == 0)
+                    {
+                        <div class="empty">No plugins found for “@_lastQuery”.</div>
+                    }
+                    @if (_results is { Count: > 0 })
+                    {
+                        <table class="table">
+                            <tbody>
+                                @foreach (var r in _results)
+                                {
+                                    var installed = _list.FirstOrDefault(p => p.Name.Equals(r.Name, StringComparison.OrdinalIgnoreCase));
+                                    <tr>
+                                        <td>
+                                            <b>@r.Title</b> <span class="muted" style="font-size:12.5px">@UmodMeta(r)</span>
+                                            <div class="muted" style="font-size:13px">@r.Description</div>
+                                        </td>
+                                        <td class="r nowrap">
+                                            <a class="btn sm ghost" href="@r.Url" target="_blank" rel="noopener"><Icon Name="external" /></a>
+                                            @if (installed is not null && !UpdateService.IsNewer(r.Version, installed.Version))
+                                            {
+                                                <span class="badge good">Installed</span>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn sm primary" disabled="@(_busy || !files)" @onclick="() => InstallAsync(r)">@(installed is null ? "Install" : "Update")</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    else if (_results is null)
+                    {
+                        <p class="muted" style="margin:0">Plugins are downloaded from <a href="https://umod.org/plugins?categories=rust" target="_blank" rel="noopener">umod.org</a>. Only install plugins you trust — they run with full access to the server.</p>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+
+    <ConfirmDialog @bind-Visible="_deleteOpen" Title="@($"Delete {_deleteTarget?.Title}?")" ConfirmText="Delete plugin" Danger="true" OnConfirm="DeleteAsync">
+        <p>The plugin is unloaded and its .cs file deleted.</p>
+        <label class="check" style="margin-top:10px"><input type="checkbox" @bind="_deleteConfig" /><span><b>Also delete its config file</b></span></label>
+    </ConfirmDialog>
+}
+
+@code {
+    private string _tab = "installed";
+    private List<PluginInfo> _list = new();
+    private string _filter = "";
+    private bool _loading = true, _busy, _checking, _deleteOpen, _deleteConfig;
+    private int _updates;
+    private string? _editing;
+    private string _config = "";
+    private string? _configError;
+    private PluginInfo? _deleteTarget;
+    private string _query = "", _lastQuery = "";
+    private List<UmodPlugin>? _results;
+    private string? _searchError;
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _editing = null;
+        await LoadAsync();
+    }
+
+    protected override Task OnLiveRefreshAsync() => Task.CompletedTask; // list refreshes after actions
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var updates = _list.Where(p => p.Update is not null).ToDictionary(p => p.Name, p => p.Update);
+            _list = await Plugins.ListAsync(Server!);
+            foreach (var p in _list)
+                if (updates.TryGetValue(p.Name, out var u) && UpdateService.IsNewer(u!.Version, p.Version)) p.Update = u;
+            _updates = _list.Count(p => p.Update is not null);
+        }
+        catch (Exception ex) { Toasts.Error($"Couldn't list plugins: {ex.Message}"); }
+        finally { _loading = false; }
+    }
+
+    private IEnumerable<PluginInfo> Filtered() => string.IsNullOrWhiteSpace(_filter)
+        ? _list
+        : _list.Where(p => p.Title.Contains(_filter, StringComparison.OrdinalIgnoreCase) || p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase) || p.Author.Contains(_filter, StringComparison.OrdinalIgnoreCase));
+
+    private async Task Act(Func<Task<string?>> action, string success, bool reload = true)
+    {
+        _busy = true;
+        try
+        {
+            string? err;
+            try { err = await action(); }
+            catch (Exception ex) { err = ex.Message; }
+            Toasts.Result(err, success);
+            if (reload)
+            {
+                await Task.Delay(1200); // give Oxide a moment to (un)load
+                await LoadAsync();
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private Task ToggleAsync(PluginInfo p, ChangeEventArgs e)
+    {
+        var on = e.Value is true || (e.Value is string s && bool.TryParse(s, out var b) && b);
+        return Act(() => Plugins.SetEnabledAsync(Server!, p.Name, on), on ? $"{p.Title} enabled." : $"{p.Title} disabled.");
+    }
+
+    private Task ReloadAsync(PluginInfo p) => Act(() => Plugins.RunAsync(Server!, "reload", p.Name), $"{p.Title} reloaded.");
+
+    private Task DeleteAsync()
+    {
+        var p = _deleteTarget!;
+        if (_editing == p.Name) _editing = null;
+        return Act(() => Plugins.DeleteAsync(Server!, p.Name, _deleteConfig), $"{p.Title} deleted.");
+    }
+
+    private async Task OpenConfigAsync(PluginInfo p)
+    {
+        var (json, err) = await Plugins.ReadConfigAsync(Server!, p.Name);
+        if (err is not null) { Toasts.Error(err); return; }
+        _editing = p.Name;
+        _config = json ?? "";
+        _configError = null;
+    }
+
+    private void Format()
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(_config);
+            _config = System.Text.Json.JsonSerializer.Serialize(doc.RootElement, new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            _configError = null;
+        }
+        catch (System.Text.Json.JsonException ex) { _configError = $"Not valid JSON: {ex.Message}"; }
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        _busy = true;
+        try
+        {
+            _configError = await Plugins.SaveConfigAsync(Server!, _editing!, _config);
+            if (_configError is null) Toasts.Success($"Saved {_editing}.json and reloaded the plugin.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        foreach (var file in e.GetMultipleFiles(20))
+        {
+            if (!file.Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) { Toasts.Error($"{file.Name} isn't a .cs file."); continue; }
+            using var reader = new StreamReader(file.OpenReadStream(2 * 1024 * 1024));
+            var source = await reader.ReadToEndAsync();
+            await Act(() => Plugins.InstallSourceAsync(Server!, file.Name, source), $"Installed {file.Name}.", reload: false);
+        }
+        await Task.Delay(1500);
+        await LoadAsync();
+    }
+
+    private async Task CheckUpdatesAsync()
+    {
+        _busy = _checking = true;
+        try
+        {
+            _updates = await Plugins.CheckUpdatesAsync(_list);
+            Toasts.Show(_updates == 0 ? "All plugins are up to date (or not listed on uMod)." : $"{_updates} plugin update(s) available.");
+        }
+        catch (Exception ex) { Toasts.Error($"Couldn't reach uMod: {ex.Message}"); }
+        finally { _busy = _checking = false; }
+    }
+
+    private Task UpdateOneAsync(PluginInfo p) =>
+        Act(() => Plugins.InstallFromUmodAsync(Server!, p.Update!), $"{p.Title} updated to {p.Update!.Version}.");
+
+    private async Task UpdateAllAsync()
+    {
+        var pending = _list.Where(p => p.Update is not null).ToList();
+        foreach (var p in pending)
+            await Act(() => Plugins.InstallFromUmodAsync(Server!, p.Update!), $"{p.Title} updated to {p.Update!.Version}.", reload: false);
+        await Task.Delay(1500);
+        await LoadAsync();
+    }
+
+    private async Task SearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_query)) return;
+        _busy = true;
+        _searchError = null;
+        try
+        {
+            _lastQuery = _query.Trim();
+            _results = await Plugins.SearchUmodAsync(_lastQuery);
+        }
+        catch (Exception ex)
+        {
+            _results = null;
+            _searchError = $"Couldn't search uMod: {ex.Message}";
+        }
+        finally { _busy = false; }
+    }
+
+    private static string UmodMeta(UmodPlugin r) =>
+        $"by {r.Author} · v{r.Version}" + (string.IsNullOrEmpty(r.Downloads) ? "" : $" · {r.Downloads} downloads");
+
+    private Task InstallAsync(UmodPlugin r) => Act(() => Plugins.InstallFromUmodAsync(Server!, r), $"Installed {r.Title}. It loads in a few seconds.");
+}

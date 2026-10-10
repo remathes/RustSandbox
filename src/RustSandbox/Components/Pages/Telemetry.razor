@@ -1,0 +1,413 @@
+@page "/s/{Id:int}/telemetry"
+@inherits ServerPageBase
+@inject LiveWorldStore World
+@inject IConfiguration Config
+@inject IJSRuntime JS
+@inject BundledPluginService Bundled
+
+<PageTitle>@(Server?.Name ?? "Server") · Plugin &amp; telemetry</PageTitle>
+
+@if (Server is not null)
+{
+    var last = World.LastTelemetryUtc(Id);
+    var receiving = last is { } l && DateTime.UtcNow - l < TimeSpan.FromMinutes(2);
+    <div class="page" style="max-width:1000px">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Plugin &amp; telemetry</h1>
+                <p>Kill stats, weapon usage, gathering and the live map come from a small Oxide/Carbon plugin that reports to this manager.</p>
+            </div>
+        </div>
+
+        <div class="callout @(receiving ? "good" : last is null ? "warn" : "bad")" style="margin-bottom:var(--gap)">
+            @if (receiving)
+            {
+                <b>Receiving data.</b> <span>Last report @Fmt.Ago(last!.Value) · @World.Players(Id).Count players on the live map.</span>
+            }
+            else if (last is null)
+            {
+                <b>No data received yet.</b> <span>Follow the steps below; this turns green within a few seconds of the plugin loading.</span>
+            }
+            else
+            {
+                <b>Reports stopped.</b> <span>Last one @Fmt.Ago(last.Value). Is the server running, and can it reach @_publicUrl?</span>
+            }
+        </div>
+
+        <section class="panel" style="margin-bottom:var(--gap)">
+            <div class="panel-body">
+                <dl class="kv">
+                    <dt>Plugin on the server</dt>
+                    <dd>
+                        @if (_pluginLoaded is null)
+                        {
+                            <span class="muted">@(Runtime.IsOnline ? "Checking…" : "Server offline")</span>
+                        }
+                        else if (_pluginLoaded == true)
+                        {
+                            <span class="badge good">Loaded</span>
+                        }
+                        else
+                        {
+                            <span class="badge bad">Not loaded</span>
+                        }
+                    </dd>
+                    <dt>Last report</dt>
+                    <dd>@(last is { } lr ? $"{Fmt.Ago(lr)} ({Fmt.Local(lr, "HH:mm:ss")})" : "None since the manager started")</dd>
+                </dl>
+                <div class="row" style="margin-top:12px">
+                    <button class="btn" @onclick="ReloadPluginAsync" disabled="@(_busy || !Runtime.IsOnline)"><Icon Name="restart" /> Reload plugin</button>
+                    <button class="btn ghost" @onclick="CheckPluginAsync" disabled="@(_busy || !Runtime.IsOnline)">Check again</button>
+                    <span class="muted" style="font-size:13px">If reports stop while the plugin is loaded, the manager reloads it automatically after 2 minutes.</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-head"><h2>Set up</h2></div>
+            <div class="panel-body">
+                <ol class="steps">
+                    <li>
+                        <b>Make sure the server runs Oxide (uMod) or Carbon.</b>
+                        <div class="muted">
+                            @if (Server.Settings.ManageProcess)
+                            {
+                                <span>Pick one in <a href="s/@Id/settings?tab=hosting">Settings → Hosting</a> and press “Install / update”.</span>
+                            }
+                            else
+                            {
+                                <span>Most hosts have a one-click option. Otherwise see <a href="https://umod.org/games/rust" target="_blank" rel="noopener">umod.org</a> or <a href="https://carbonmod.gg" target="_blank" rel="noopener">carbonmod.gg</a>.</span>
+                            }
+                        </div>
+                    </li>
+                    <li>
+                        <b>Tell the plugin where this manager is.</b>
+                        <div class="muted" style="margin-bottom:8px">The game server must be able to reach this address over HTTP. Use your machine's LAN or public IP, not localhost, unless both run on the same machine.</div>
+                        <div class="row" style="flex-wrap:nowrap;max-width:620px">
+                            <input class="input" @bind="_publicUrl" placeholder="http://192.168.1.20:5080" />
+                            <button class="btn" @onclick="SaveUrlAsync">Save</button>
+                        </div>
+                    </li>
+                    <li>
+                        <b>Install the plugin and its config.</b>
+                        @if (Server.Settings.ManageProcess && Server.Settings.Framework != ModFramework.Vanilla)
+                        {
+                            <div class="row" style="margin:8px 0">
+                                <button class="btn primary" @onclick="InstallAsync" disabled="@_busy"><Icon Name="bolt" /> Install on this server</button>
+                                <span class="muted">Copies both files into @(Server.Settings.Framework == ModFramework.Carbon ? "carbon/" : "oxide/") and reloads the plugin.</span>
+                            </div>
+                            <div class="muted">Or do it by hand:</div>
+                        }
+                        <div class="row" style="margin:8px 0">
+                            <a class="btn" href="/api/plugin" download><Icon Name="download" /> RustSandboxTelemetry.cs</a>
+                            <a class="btn" href="/api/servers/@Id/plugin-config" download><Icon Name="download" /> Config (.json)</a>
+                        </div>
+                        <div class="muted">Put the <code>.cs</code> file in <code>oxide/plugins</code> (or <code>carbon/plugins</code>) and the <code>.json</code> in <code>oxide/config</code> (or <code>carbon/configs</code>). It loads automatically.</div>
+                    </li>
+                    <li>
+                        <b>Check the light above turns green.</b>
+                        <div class="muted">If it doesn't, run <code>oxide.reload RustSandboxTelemetry</code> in the <a href="s/@Id/console">console</a> and look for errors.</div>
+                    </li>
+                </ol>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Event HUD</h2>
+                <span class="spacer"></span>
+                @if (_hudLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_hudLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">A separate plugin that adds an overlay to every player's screen: green or red icons for the airdrop, Patrol Helicopter, Bradley, Cargo Ship, Chinook and the small and large oil rigs, the grid square and hack timer of each locked crate, and a radiation detector that pulses faster as you get closer. Events are announced in chat too. It sits top right by default. Each player can move it to another corner, nudge it, or hide it by typing <code>/eventhud</code> in chat.</p>
+                <div class="row">
+                    @if (BundledPlugin.EventHud.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallHudAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.EventHud.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.EventHud.DownloadPath" download><Icon Name="download" /> @BundledPlugin.EventHud.FileName</a>
+                </div>
+                <p class="help" style="margin-top:8px">The default position, size, colors, which events to show and the chat announcements are set in <code>@ConfigPath(BundledPlugin.EventHud)</code>, created when the plugin first loads.</p>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Skills &amp; perks</h2>
+                <span class="spacer"></span>
+                @if (_skillsLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_skillsLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Players earn XP in nine skills (<strong>Mining</strong>, <strong>Woodcutting</strong>, <strong>Combat</strong>, <strong>Gardening</strong>, <strong>Electrician</strong>, <strong>Survival</strong>, <strong>Mechanic</strong>, <strong>Fishing</strong> and <strong>Scrapper</strong>), level up and spend points on perks: more ore, wood, crops and fish, faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels and batteries, slower hunger and thirst, and vehicles that burn less fuel. Solo players get +25% XP and an extra point every 5 levels; teammates playing close together share 10% of each other's XP. Players type <code>/skills</code> in chat to open the skills menu.</p>
+                <div class="row">
+                    @if (BundledPlugin.Skills.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallSkillsAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Skills.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Skills.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Skills.FileName</a>
+                </div>
+                <p class="help" style="margin-top:8px">XP amounts, the level curve, solo and team bonuses, each perk's max rank and bonus, and whether skills reset on wipe are set in <code>@ConfigPath(BundledPlugin.Skills)</code>. Admins can test with <code>sandboxskills.givexp &lt;name&gt; mining 500</code> in the console.</p>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Daily rewards</h2>
+                <span class="spacer"></span>
+                @if (_dailyLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_dailyLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Once a day each player spins a reel for a random item, from a pile of dung to a rocket launcher, weighted by rarity tier. Claiming several days in a row guarantees a better tier, epic wins are announced to everyone, and the day resets at midnight server time. Players get a popup when they wake up, or type <code>/daily</code>.</p>
+                <div class="row">
+                    @if (BundledPlugin.Daily.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallDailyAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Daily.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Daily.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Daily.FileName</a>
+                    <a class="btn" href="s/@Id/daily">Edit the rewards</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Events</h2>
+                <span class="spacer"></span>
+                @if (_eventsLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_eventsLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Server events players can join. The <strong>Treasure Hunt</strong> starts at the Airfield: players pick up a Treasure Compass that beeps faster as they close in and marks each monument on their compass, follow riddles to hidden spots at four monuments, and the first to open the Golden Statue crate wins epic loot. The <strong>Train Heist</strong> sends a self-driving loot train with scientist guards around the rail loop: board it, clear the guards and hack the locked crate before it leaves.</p>
+                <div class="row">
+                    @if (BundledPlugin.Events.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallEventsAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Events.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Events.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Events.FileName</a>
+                    <a class="btn" href="s/@Id/events">Run an event</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Quests</h2>
+                <span class="spacer"></span>
+                @if (_questsLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_questsLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Quest givers you place in the world. Walk up to one and press <kbd>E</kbd> to see their quests: gather resources, hunt scientists or animals, loot crates at a monument, craft, bring items, open keycard doors or explore. A tracker on the right of the screen shows progress, and finished quests are handed in for the rewards you choose. Quest givers and quest locations are marked on each player's map and compass. Players type <code>/quests</code> for their quest log, or <code>/quests list</code> to see where everything is.</p>
+                <div class="row">
+                    @if (BundledPlugin.Quests.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallQuestsAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Quests.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Quests.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Quests.FileName</a>
+                    <a class="btn" href="s/@Id/quests">Edit quests</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Player help</h2>
+                <span class="spacer"></span>
+                @if (_helpLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_helpLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">A guide to every player command on the server. It opens by itself the first time someone joins, and after that a chat tip reminds them to type <code>/help</code> (or <code>/commands</code>). Each system has its own page, pages only show for plugins that are loaded, and admin commands are only shown to admins. Players can press RUN next to a command to try it. The pages are in the plugin's config file if you want to change the wording.</p>
+                <div class="row">
+                    @if (BundledPlugin.Help.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallHelpAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Help.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Help.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Help.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Plugin config for this server</h2>
+                <span class="spacer"></span>
+                <button class="btn sm" @onclick="() => _showKey = !_showKey">@(_showKey ? "Hide key" : "Show key")</button>
+                <button class="btn sm danger" @onclick="() => _regenOpen = true">New key</button>
+            </div>
+            <div class="panel-body">
+                <div class="codebox">@ConfigPreview()<button class="btn sm ghost icon" title="Copy" @onclick="CopyConfigAsync"><Icon Name="copy" /></button></div>
+                <p class="help" style="margin-top:8px">The API key proves reports really come from your server. Anyone with it can send fake stats, so keep it private.</p>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head"><h2>What it records</h2></div>
+            <div class="panel-body">
+                <dl class="kv">
+                    <dt>Deaths</dt><dd>Every player death with killer, weapon, distance, body part and position; plus players killing scientists, animals, Patrol Helicopter and Bradley.</dd>
+                    <dt>Weapon use</dt><dd>Shots fired and hits per player and weapon — powers “most used weapon” and accuracy.</dd>
+                    <dt>Gathering</dt><dd>What each player gathers per day: wood and ore from trees and nodes, pickups (hemp, mushrooms, berries), farming, animal harvesting and fishing. Needs plugin 1.5.0 or newer.</dd>
+                    <dt>Positions</dt><dd>Every @Server.Settings.PositionIntervalSeconds s for the live map; stored every @Config.GetValue("Manager:PositionSampleSeconds", 30) s for heat maps.</dd>
+                    <dt>Sessions</dt><dd>Connects and disconnects.</dd>
+                    <dt>Retention</dt><dd>Positions are kept @Config.GetValue("Manager:RetentionDays", 30) days, kills four times longer.</dd>
+                </dl>
+            </div>
+        </section>
+    </div>
+
+    <ConfirmDialog @bind-Visible="_regenOpen" Title="Create a new API key?" ConfirmText="Create key" Danger="true" OnConfirm="RegenerateAsync">
+        <p>The plugin stops reporting until you update its config with the new key (or press “Install on this server” again).</p>
+    </ConfirmDialog>
+}
+
+@code {
+    private string _publicUrl = "";
+    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded;
+    private bool _showKey, _busy, _regenOpen;
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _publicUrl = await Servers.GetAppSettingAsync("PublicUrl")
+                     ?? Config["Manager:PublicUrl"]
+                     ?? Nav.BaseUri.TrimEnd('/');
+        await CheckPluginAsync();
+    }
+
+    private async Task CheckPluginAsync()
+    {
+        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = null;
+        if (Server is null || !Runtime.IsOnline) return;
+        var list = await Connections.QueryAsync(Id, PluginService.Prefix(Server.Settings) + "plugins", TimeSpan.FromSeconds(8));
+        _pluginLoaded = list is null ? null : list.Contains("RustSandboxTelemetry", StringComparison.OrdinalIgnoreCase);
+        _hudLoaded = list is null ? null : list.Contains(BundledPlugin.EventHud.PluginName, StringComparison.OrdinalIgnoreCase);
+        _skillsLoaded = list is null ? null : list.Contains(BundledPlugin.Skills.PluginName, StringComparison.OrdinalIgnoreCase);
+        _dailyLoaded = list is null ? null : list.Contains(BundledPlugin.Daily.PluginName, StringComparison.OrdinalIgnoreCase);
+        _eventsLoaded = list is null ? null : list.Contains(BundledPlugin.Events.PluginName, StringComparison.OrdinalIgnoreCase);
+        _questsLoaded = list is null ? null : list.Contains(BundledPlugin.Quests.PluginName, StringComparison.OrdinalIgnoreCase);
+        _helpLoaded = list is null ? null : list.Contains(BundledPlugin.Help.PluginName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task ReloadPluginAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Connections.ExecuteAsync(Id, PluginService.Prefix(Server!.Settings) + "reload RustSandboxTelemetry");
+            await Task.Delay(2500);
+            await CheckPluginAsync();
+            Toasts.Show(_pluginLoaded == true ? "Plugin reloaded — reports should arrive within a few seconds." : "The plugin didn't load. Check the console for errors, or reinstall it below.");
+        }
+        finally { _busy = false; }
+    }
+
+    private string ConfigPreview()
+    {
+        if (Server is null) return "";
+        var json = ProcessManager.PluginConfigJson(Server, _publicUrl);
+        return _showKey ? json : json.Replace(Server.TelemetryApiKey, new string('•', 12) + Server.TelemetryApiKey[^4..]);
+    }
+
+    private async Task SaveUrlAsync()
+    {
+        var url = _publicUrl.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
+        {
+            Toasts.Error("Enter a full address like http://192.168.1.20:5080");
+            return;
+        }
+        _publicUrl = url;
+        await Servers.SetAppSettingAsync("PublicUrl", url);
+        Toasts.Success(Server?.Settings.ManageProcess == true
+            ? "Saved. Press “Install on this server” to update the plugin config."
+            : "Saved. Download the config again and replace the old one.");
+    }
+
+    private async Task InstallAsync()
+    {
+        _busy = true;
+        try { Toasts.Result(await Processes.InstallTelemetryPluginAsync(Server!, _publicUrl), "Plugin installed. Data should arrive within a few seconds."); }
+        finally { _busy = false; }
+    }
+
+    private string ConfigPath(BundledPlugin plugin) =>
+        $"{(Server!.Settings.Framework == ModFramework.Carbon ? "carbon/configs" : "oxide/config")}/{plugin.PluginName}.json";
+
+    private Task InstallHudAsync() => InstallBundledAsync(BundledPlugin.EventHud, "Event HUD installed. Players see it right away.");
+
+    private Task InstallSkillsAsync() => InstallBundledAsync(BundledPlugin.Skills, "Skills plugin installed. Players can type /skills.");
+
+    private Task InstallDailyAsync() => InstallBundledAsync(BundledPlugin.Daily, "Daily rewards installed. Players can type /daily.");
+
+    private Task InstallEventsAsync() => InstallBundledAsync(BundledPlugin.Events, "Events plugin installed. Start a treasure hunt from the Events page.");
+
+    private Task InstallQuestsAsync() => InstallBundledAsync(BundledPlugin.Quests, "Quests plugin installed. Place a quest giver from the Quests page.");
+    private Task InstallHelpAsync() => InstallBundledAsync(BundledPlugin.Help, "Help plugin installed. Players type /help in game.");
+
+    private async Task InstallBundledAsync(BundledPlugin plugin, string done)
+    {
+        _busy = true;
+        try
+        {
+            Toasts.Result(await Bundled.InstallAsync(Server!, plugin), done);
+            await CheckPluginAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task CopyConfigAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("RSM.copy", ProcessManager.PluginConfigJson(Server!, _publicUrl));
+            Toasts.Success("Config copied (with the real key).");
+        }
+        catch (JSException) { Toasts.Error("Couldn't access the clipboard."); }
+    }
+
+    private async Task RegenerateAsync()
+    {
+        await Servers.RegenerateApiKeyAsync(Id);
+        await ReloadServerAsync();
+        Toasts.Success("New key created. Update the plugin config.");
+    }
+}

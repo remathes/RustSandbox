@@ -1,0 +1,339 @@
+@page "/s/{Id:int}/players"
+@inherits ServerPageBase
+@inject StatsService Stats
+@inject IJSRuntime JS
+@inject PermissionService Perms
+
+<PageTitle>@(Server?.Name ?? "Server") · Players</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Players</h1>
+                <p>@Runtime.Players.Count online. Click anyone to see their kills, deaths and weapons.</p>
+            </div>
+            <input class="input" style="max-width:260px" placeholder="Search name or Steam ID" @bind="_search" @bind:event="oninput" />
+        </div>
+
+        <div class="tabs" role="tablist">
+            <button role="tab" class="@(_tab == "online" ? "on" : "")" @onclick='() => _tab = "online"'>Online now (@Runtime.Players.Count)</button>
+            <button role="tab" class="@(_tab == "all" ? "on" : "")" @onclick="ShowAllAsync">Everyone seen</button>
+            <button role="tab" class="@(_tab == "bans" ? "on" : "")" @onclick="ShowBansAsync">Bans &amp; staff</button>
+        </div>
+
+        <div class="grid @(Player is null ? "" : "g-side")" style="@(Player is null ? "" : "grid-template-columns:minmax(0,1fr) minmax(360px,520px)")">
+            <section class="panel">
+                <div class="panel-body flush table-wrap">
+                    @if (_tab == "online")
+                    {
+                        var rows = OnlineRows();
+                        @if (rows.Count == 0)
+                        {
+                            <div class="empty">
+                                <h3>@(Runtime.IsOnline ? "Nobody online" : "Not connected")</h3>
+                                <p>@(Runtime.IsOnline ? "Players appear here as they join." : "The player list loads once RCON is connected.")</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" @onclick='() => SortBy("name")'>Player @Arrow("name")</th>
+                                        <th class="sortable r" @onclick='() => SortBy("time")'>Online for @Arrow("time")</th>
+                                        <th class="sortable r" @onclick='() => SortBy("ping")'>Ping @Arrow("ping")</th>
+                                        <th class="sortable r" @onclick='() => SortBy("health")'>Health @Arrow("health")</th>
+                                        <th class="r">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in rows)
+                                    {
+                                        <tr class="clickable" @onclick="() => Open(p.SteamId)" style="@(p.SteamId == Player ? "background:var(--steel-750)" : "")">
+                                            <td>
+                                                <div class="row" style="flex-wrap:nowrap;gap:10px">
+                                                    <div class="avatar" style="width:30px;height:30px;font-size:13px;background:@PlayerStatsPanel.AvatarColor(p.SteamId)">@PlayerStatsPanel.Initials(p.Name)</div>
+                                                    <div style="min-width:0">
+                                                        <div class="ellipsis"><b>@p.Name</b></div>
+                                                        <div class="muted" style="font-size:12px">@p.SteamId</div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td class="r">@Fmt.Duration(TimeSpan.FromSeconds(p.ConnectedSeconds))</td>
+                                            <td class="r num @(p.Ping > 150 ? "warn" : "")">@p.Ping</td>
+                                            <td class="r num @(p.Health < 30 ? "bad" : "")">@p.Health.ToString("0")</td>
+                                            <td class="r nowrap" @onclick:stopPropagation="true">
+                                                <a class="btn sm ghost" href="s/@Id/map?player=@p.SteamId" title="Show on live map"><Icon Name="map" /></a>
+                                                <button class="btn sm ghost" title="Copy Steam ID" @onclick="() => CopyAsync(p.SteamId)"><Icon Name="copy" /></button>
+                                                <button class="btn sm" @onclick='() => Moderate(p, "kick")'>Kick</button>
+                                                <button class="btn sm danger" @onclick='() => Moderate(p, "ban")'>Ban</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    }
+                    else if (_tab == "bans")
+                    {
+                        <div class="panel-body stack">
+                            <div>
+                                <h3 style="margin-bottom:8px">Ban someone by Steam ID</h3>
+                                <div class="row">
+                                    <input class="input" style="max-width:220px" placeholder="Steam ID (17 digits)" @bind="_banId" />
+                                    <input class="input" style="max-width:180px" placeholder="Name (optional)" @bind="_banName" />
+                                    <input class="input" style="max-width:240px" placeholder="Reason" @bind="_banReason" />
+                                    <select class="input" style="width:auto" @bind="_banDuration">
+                                        <option value="">Permanent</option>
+                                        <option value="1d">1 day</option>
+                                        <option value="7d">7 days</option>
+                                        <option value="30d">30 days</option>
+                                    </select>
+                                    <button class="btn danger" @onclick="BanByIdAsync" disabled="@(string.IsNullOrWhiteSpace(_banId))">Ban</button>
+                                </div>
+                            </div>
+                            <div>
+                                <h3 style="margin-bottom:8px">Banned players (@(_bans?.Count ?? 0))</h3>
+                                @if (_bans is null)
+                                {
+                                    <p class="muted">@(Runtime.IsOnline ? "Loading…" : "The ban list loads when the server is online.")</p>
+                                }
+                                else if (_bans.Count == 0)
+                                {
+                                    <p class="muted">Nobody is banned.</p>
+                                }
+                                else
+                                {
+                                    <table class="table">
+                                        <thead><tr><th>Player</th><th>Reason</th><th></th></tr></thead>
+                                        <tbody>
+                                            @foreach (var b in _bans.Where(b => string.IsNullOrWhiteSpace(_search) || b.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || b.SteamId.Contains(_search)))
+                                            {
+                                                <tr>
+                                                    <td><b>@b.Name</b> <a class="muted" style="font-size:12px" href="@Fmt.SteamProfile(b.SteamId)" target="_blank" rel="noopener">@b.SteamId</a></td>
+                                                    <td class="dim">@b.Reason</td>
+                                                    <td class="r"><button class="btn sm" @onclick="() => UnbanAsync(b)">Unban</button></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                            </div>
+                            <div>
+                                <h3 style="margin-bottom:8px">Owners &amp; moderators</h3>
+                                @if (_staff is null)
+                                {
+                                    <p class="muted">The staff list is read from the server's users.cfg, so it shows for servers this machine runs. Change roles from any player's page.</p>
+                                }
+                                else if (_staff.Count == 0)
+                                {
+                                    <p class="muted">No owners or moderators set. Open a player and use “Change role”.</p>
+                                }
+                                else
+                                {
+                                    <table class="table">
+                                        <tbody>
+                                            @foreach (var st in _staff)
+                                            {
+                                                <tr class="clickable" @onclick="() => Open(st.SteamId)">
+                                                    <td><b>@st.Name</b> <span class="muted" style="font-size:12px">@st.SteamId</span></td>
+                                                    <td class="r"><span class="badge @(st.Role == "Owner" ? "rust" : "")">@st.Role</span></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        var seen = SeenRows();
+                        @if (_all is null)
+                        {
+                            <div class="empty">Loading…</div>
+                        }
+                        else if (seen.Count == 0)
+                        {
+                            <div class="empty">
+                                <h3>No players recorded yet</h3>
+                                <p>Install the telemetry plugin to record kills and deaths per player.</p>
+                                <a class="btn" href="s/@Id/telemetry">Set up telemetry</a>
+                            </div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead><tr><th>Player</th><th class="r">Kills</th><th class="r">Deaths</th><th class="r">K/D</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var p in seen)
+                                    {
+                                        var online = Runtime.Players.Any(o => o.SteamId == p.SteamId);
+                                        <tr class="clickable" @onclick="() => Open(p.SteamId)" style="@(p.SteamId == Player ? "background:var(--steel-750)" : "")">
+                                            <td><b>@p.Name</b> <span class="muted" style="font-size:12px">@p.SteamId</span></td>
+                                            <td class="r num">@p.Kills</td>
+                                            <td class="r num">@p.Deaths</td>
+                                            <td class="r num">@(p.Deaths == 0 ? p.Kills.ToString("0.00") : ((double)p.Kills / p.Deaths).ToString("0.00"))</td>
+                                            <td class="r">
+                                                @if (online)
+                                                {
+                                                    <span class="badge good">online</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    }
+                </div>
+            </section>
+
+            @if (Player is not null)
+            {
+                <section class="panel">
+                    <div class="panel-body">
+                        <PlayerAdminPanel @key="Player" Server="Server" SteamId="@Player" Name="@PlayerName(Player)" />
+                        <div style="margin:4px 0 16px"><SkillsPlayerPanel @key="Player" ServerId="Id" SteamId="@Player" Compact="true" /></div>
+                        <PlayerStatsPanel ServerId="Id" SteamId="@Player" WorldSize="Server.Settings.WorldSize" OnClose="Close" />
+                    </div>
+                </section>
+            }
+        </div>
+    </div>
+
+    <ConfirmDialog @bind-Visible="_modOpen" Title="@($"{(_modAction == "ban" ? "Ban" : "Kick")} {_modTarget?.Name}?")"
+                   ConfirmText="@(_modAction == "ban" ? "Ban player" : "Kick player")" Danger="true" OnConfirm="ModerateAsync">
+        <p>@(_modAction == "ban" ? "They'll be disconnected and can't rejoin until unbanned (unban " + _modTarget?.SteamId + ")." : "They'll be disconnected but can rejoin.")</p>
+        <label class="field" style="margin-top:10px">
+            <span>Reason shown to the player</span>
+            <input class="input" @bind="_modReason" />
+        </label>
+    </ConfirmDialog>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "player")] public string? Player { get; set; }
+
+    private string _tab = "online";
+    private string _search = "";
+    private string _sort = "time";
+    private bool _desc = true;
+    private List<PlayerSearchResult>? _all;
+    private bool _modOpen;
+    private string _modAction = "kick";
+    private string _modReason = "";
+    private OnlinePlayer? _modTarget;
+
+    protected override Task OnServerChangedAsync()
+    {
+        _all = null;
+        if (_tab == "all") return ShowAllAsync();
+        return Task.CompletedTask;
+    }
+
+    private List<OnlinePlayer> OnlineRows()
+    {
+        IEnumerable<OnlinePlayer> q = Runtime.Players;
+        if (!string.IsNullOrWhiteSpace(_search))
+            q = q.Where(p => p.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || p.SteamId.Contains(_search));
+        Func<OnlinePlayer, object> key = _sort switch
+        {
+            "name" => p => p.Name.ToLowerInvariant(),
+            "ping" => p => p.Ping,
+            "health" => p => p.Health,
+            _ => p => p.ConnectedSeconds,
+        };
+        return (_desc ? q.OrderByDescending(key) : q.OrderBy(key)).ToList();
+    }
+
+    private List<PlayerSearchResult> SeenRows()
+    {
+        if (_all is null) return new();
+        if (string.IsNullOrWhiteSpace(_search)) return _all;
+        return _all.Where(p => p.Name.Contains(_search, StringComparison.OrdinalIgnoreCase) || p.SteamId.Contains(_search)).ToList();
+    }
+
+    private List<BanEntry>? _bans;
+    private List<StaffEntry>? _staff;
+    private string _banId = "", _banName = "", _banReason = "Breaking server rules", _banDuration = "";
+
+    private string PlayerName(string steamId) =>
+        Runtime.Players.FirstOrDefault(p => p.SteamId == steamId)?.Name
+        ?? _all?.FirstOrDefault(p => p.SteamId == steamId)?.Name
+        ?? steamId;
+
+    private async Task ShowBansAsync()
+    {
+        _tab = "bans";
+        _staff = PermissionService.ReadStaff(Server!);
+        _bans = null;
+        if (!Runtime.IsOnline) return;
+        try { _bans = await Perms.BansAsync(Server!); }
+        catch (Exception ex) { Toasts.Error(ex.Message); }
+    }
+
+    private async Task BanByIdAsync()
+    {
+        var err = await Perms.BanAsync(Server!, _banId.Trim(), _banName.Trim(), _banReason, _banDuration);
+        Toasts.Result(err, $"Banned {(_banName.Trim().Length > 0 ? _banName.Trim() : _banId.Trim())}.");
+        if (err is null) { _banId = _banName = ""; await ShowBansAsync(); }
+    }
+
+    private async Task UnbanAsync(BanEntry b)
+    {
+        var err = await Perms.UnbanAsync(Server!, b.SteamId);
+        Toasts.Result(err, $"Unbanned {b.Name}.");
+        await ShowBansAsync();
+    }
+
+    private async Task ShowAllAsync()
+    {
+        _tab = "all";
+        _all = await Stats.SearchPlayersAsync(Id, null, 500);
+    }
+
+    private void SortBy(string key)
+    {
+        if (_sort == key) _desc = !_desc;
+        else { _sort = key; _desc = key != "name"; }
+    }
+
+    private string Arrow(string key) => _sort != key ? "" : _desc ? "↓" : "↑";
+
+    private void Open(string steamId) => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", steamId));
+    private void Close() => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", (string?)null));
+
+    private async Task CopyAsync(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("RSM.copy", text);
+            Toasts.Success("Steam ID copied.");
+        }
+        catch (JSException) { Toasts.Error("Couldn't access the clipboard."); }
+    }
+
+    private void Moderate(OnlinePlayer p, string action)
+    {
+        _modTarget = p;
+        _modAction = action;
+        _modReason = action == "ban" ? "Breaking server rules" : "Kicked by an admin";
+        _modOpen = true;
+    }
+
+    private async Task ModerateAsync()
+    {
+        if (_modTarget is null) return;
+        var reason = _modReason.Replace("\"", "'");
+        var name = _modTarget.Name.Replace("\"", "'");
+        var cmd = _modAction == "ban"
+            ? $"banid {_modTarget.SteamId} \"{name}\" \"{reason}\""
+            : $"kick {_modTarget.SteamId} \"{reason}\"";
+        await Connections.ExecuteAsync(Id, cmd);
+        if (_modAction == "ban") await Connections.ExecuteAsync(Id, $"kick {_modTarget.SteamId} \"{reason}\"");
+        Toasts.Success(_modAction == "ban" ? $"Banned {_modTarget.Name}." : $"Kicked {_modTarget.Name}.");
+    }
+}

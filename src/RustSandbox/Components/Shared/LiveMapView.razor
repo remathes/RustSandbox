@@ -1,0 +1,136 @@
+@* Reusable live map: generated/real background, heat layer, live players and recent kills. *@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject LiveWorldStore World
+@inject HeatmapService Heat
+@inject LiveEvents Live
+@inject TelemetryService Telemetry
+
+<div class="map-wrap" style="@Style" @ref="_el"></div>
+
+@code {
+    [Parameter, EditorRequired] public int ServerId { get; set; }
+    [Parameter] public int Seed { get; set; }
+    [Parameter] public int WorldSize { get; set; } = 4000;
+    [Parameter] public string? MapImageUrl { get; set; }
+    [Parameter] public int? MapImageMargin { get; set; }
+    [Parameter] public HeatLayer Layer { get; set; } = HeatLayer.Presence;
+    [Parameter] public DateTime? FromUtc { get; set; }
+    [Parameter] public string? Style { get; set; }
+    [Parameter] public EventCallback<string> OnPlayer { get; set; }
+
+    private ElementReference _el;
+    private int? _mapId;
+    private DotNetObjectReference<LiveMapView>? _ref;
+    private (int, int, int, string?, int?, int) _worldKey;
+    private List<MonumentDto> _monuments = new();
+
+    protected override async Task OnParametersSetAsync() => _monuments = await Telemetry.GetMonumentsAsync(ServerId);
+    private (HeatLayer, DateTime?) _heatKey;
+    private DateTime _heatLoaded;
+    private int _queued;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        Live.PositionsUpdated += OnLive;
+        Live.KillRecorded += OnKill;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (_mapId is null)
+            {
+                _ref = DotNetObjectReference.Create(this);
+                _mapId = await JS.InvokeAsync<int>("RSM.liveMap.create", _el, _ref);
+            }
+            var worldKey = (ServerId, Seed, WorldSize, MapImageUrl, MapImageMargin, _monuments.Count);
+            if (worldKey != _worldKey)
+            {
+                _worldKey = worldKey;
+                await JS.InvokeVoidAsync("RSM.liveMap.setWorld", _mapId, new { seed = Seed, size = WorldSize, imageUrl = string.IsNullOrWhiteSpace(MapImageUrl) ? null : MapImageUrl, imageMargin = MapImageMargin, monuments = _monuments.Select(m => new { name = m.Name, x = m.X, z = m.Z }) });
+                _heatKey = default;
+            }
+            if ((Layer, FromUtc) != _heatKey)
+            {
+                _heatKey = (Layer, FromUtc);
+                await LoadHeatAsync();
+                await PushLiveAsync();
+            }
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    private async Task LoadHeatAsync()
+    {
+        if (_mapId is null) return;
+        var points = await Heat.GetAsync(ServerId, Layer, FromUtc);
+        _heatLoaded = DateTime.UtcNow;
+        await JS.InvokeVoidAsync("RSM.liveMap.setHeat", _mapId, points.Select(p => new[] { p.X, p.Z, p.W }),
+            new { radiusMeters = Layer == HeatLayer.Presence ? 40 : 55, intensity = Layer == HeatLayer.Presence ? 0.5 : 0.7 });
+    }
+
+    private async Task PushLiveAsync()
+    {
+        if (_mapId is null) return;
+        var now = DateTime.UtcNow;
+        var players = World.Players(ServerId).Select(p => new { id = p.SteamId, name = p.Name, x = p.X, z = p.Z, h = p.Health });
+        var kills = World.RecentKills(ServerId, 60)
+            .Where(k => (now - k.Timestamp).TotalMinutes < 15 && (k.VictimX != 0 || k.VictimZ != 0))
+            .Select(k => new { x = k.VictimX, z = k.VictimZ, kx = k.KillerX, kz = k.KillerZ, pvp = k.IsPvp, ageSec = (now - k.Timestamp).TotalSeconds });
+        await JS.InvokeVoidAsync("RSM.liveMap.setLive", _mapId, players, kills);
+    }
+
+    public async Task FocusAsync(string? steamId)
+    {
+        if (_mapId is not null) await JS.InvokeVoidAsync("RSM.liveMap.focusPlayer", _mapId, steamId);
+    }
+
+    public async Task SetOptionsAsync(object options)
+    {
+        if (_mapId is not null) await JS.InvokeVoidAsync("RSM.liveMap.setOptions", _mapId, options);
+    }
+
+    [JSInvokable]
+    public async Task OnPlayerClicked(string steamId)
+    {
+        await FocusAsync(steamId);
+        await OnPlayer.InvokeAsync(steamId);
+    }
+
+    private void OnKill(int id, KillEvent _) => OnLive(id);
+
+    private void OnLive(int id)
+    {
+        if (id != ServerId || _disposed || Interlocked.Exchange(ref _queued, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(1500);
+            Interlocked.Exchange(ref _queued, 0);
+            if (_disposed) return;
+            try
+            {
+                await InvokeAsync(async () =>
+                {
+                    await PushLiveAsync();
+                    if (DateTime.UtcNow - _heatLoaded > TimeSpan.FromMinutes(1)) await LoadHeatAsync();
+                });
+            }
+            catch (Exception) { /* circuit gone */ }
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        Live.PositionsUpdated -= OnLive;
+        Live.KillRecorded -= OnKill;
+        if (_mapId is not null)
+        {
+            try { await JS.InvokeVoidAsync("RSM.liveMap.dispose", _mapId); } catch (JSDisconnectedException) { } catch (TaskCanceledException) { }
+        }
+        _ref?.Dispose();
+    }
+}

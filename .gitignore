@@ -1,0 +1,15 @@
+bin/
+obj/
+publish/
+*.db
+*.db-shm
+*.db-wal
+.vs/
+.vscode/
+*.user
+installer/output/
+
+# Local backups and build zips (not source)
+.before-*/
+*.zip
+*.bak

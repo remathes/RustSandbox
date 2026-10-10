@@ -1,0 +1,46 @@
+@* Horizontal ranked bars: label · bar · value *@
+@if (!Items.Any())
+{
+    <div class="muted" style="font-size:13.5px">@Empty</div>
+}
+else
+{
+    var max = Items.Max(i => i.Value);
+    if (max <= 0) { max = 1; }
+    <div class="barlist">
+        @foreach (var item in Items.Take(Take))
+        {
+            <div class="bar-row" title="@Tip(item)">
+                @if (OnSelect.HasDelegate)
+                {
+                    <a class="name" href="javascript:void(0)" @onclick="() => OnSelect.InvokeAsync(item)">@item.Name</a>
+                }
+                else
+                {
+                    <span class="name">@item.Name</span>
+                }
+                <div class="bar-track"><div class="bar-fill" style="width:@((item.Value / max * 100).ToString("0.#", CultureInfo.InvariantCulture))%;background:@Color"></div></div>
+                <span class="v">
+                    @item.Value.ToString(Format)
+                    @if (item.Detail is not null && ShowDetail)
+                    {
+                        <small>@item.Detail</small>
+                    }
+                </span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private string Tip(NamedValue item) =>
+        item.Detail is null ? $"{item.Name}: {item.Value.ToString(Format)}" : $"{item.Name}: {item.Value.ToString(Format)} ({item.Detail})";
+
+    [Parameter] public IEnumerable<NamedValue> Items { get; set; } = Array.Empty<NamedValue>();
+    [Parameter] public string Color { get; set; } = "var(--rust)";
+    [Parameter] public string Format { get; set; } = "N0";
+    [Parameter] public int Take { get; set; } = 10;
+    [Parameter] public bool ShowDetail { get; set; }
+    [Parameter] public string Empty { get; set; } = "No data yet.";
+    [Parameter] public EventCallback<NamedValue> OnSelect { get; set; }
+}

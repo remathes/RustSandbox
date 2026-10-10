@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <meta name="theme-color" content="#171c21" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600&family=JetBrains+Mono:wght@400;500&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="app.css?v=@AssetVersion" />
+    <link rel="stylesheet" href="theme-molten.css?v=@AssetVersion" />
+    <link rel="stylesheet" href="theme-ingame.css?v=@AssetVersion" />
+    <link rel="stylesheet" href="theme-toxic.css?v=@AssetVersion" />
+    @* Apply the saved theme before the page paints, so it doesn't flash the wrong look first. *@
+    <script>try{var d=document.documentElement;var t=localStorage.getItem("rs-theme");d.dataset.theme=t==="classic"||t==="molten"||t==="ingame"||t==="toxic"?t:"ingame";d.dataset.glow=localStorage.getItem("rs-glow")||"strong";var p=d.dataset.theme!=="classic"&&localStorage.getItem("rs-bg");if(p){d.style.setProperty("--page-photo","url("+JSON.stringify(p)+")");d.dataset.photo="on";}}catch(e){}</script>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <HeadOutlet @rendermode="PageRenderMode" />
+</head>
+
+<body>
+    <Routes @rendermode="PageRenderMode" />
+    <div id="blazor-error-ui">
+        Something went wrong. The page may need a reload.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">✕</a>
+    </div>
+    <script src="_framework/blazor.web.js"></script>
+    <script src="js/app.js?v=@AssetVersion"></script>
+    <script src="js/theme.js?v=@AssetVersion"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // Changes with every build, so browsers fetch the new stylesheet and script after an update instead of a cached copy.
+    private static readonly string AssetVersion =
+        (string.IsNullOrEmpty(typeof(App).Assembly.Location) ? DateTime.UtcNow : File.GetLastWriteTimeUtc(typeof(App).Assembly.Location)).Ticks.ToString("x");
+
+    // The sign-in page is plain server-rendered HTML (it posts a form); everything else is interactive.
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.Request.Path.StartsWithSegments("/login") || HttpContext.Request.Path.StartsWithSegments("/error")
+            ? null
+            : InteractiveServer;
+}

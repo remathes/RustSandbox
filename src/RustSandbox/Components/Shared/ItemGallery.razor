@@ -1,0 +1,123 @@
+@* Picture grid of every item, by category, for choosing rewards without knowing shortnames. Weapons are grouped by how strong they are. *@
+@using RustSandbox.Services
+@if (Visible)
+{
+    <div class="backdrop" @onclick="Close">
+        <div class="modal item-gallery" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="modal-head row" style="gap:8px">
+                <h2 style="margin:0">@Title</h2>
+                <span class="spacer" style="flex:1"></span>
+                <input class="input" style="width:220px" placeholder="Search items" @bind="_search" @bind:event="oninput" />
+                <button class="btn sm ghost" @onclick="Close">Close</button>
+            </div>
+            <div class="gallery-cats">
+                @foreach (var c in Categories)
+                {
+                    var cat = c;
+                    <button class="btn sm @(_category == cat && _search.Length == 0 ? "primary" : "ghost")" @onclick="() => { _category = cat; _search = string.Empty; }">@CategoryLabel(cat)</button>
+                }
+            </div>
+            <div class="modal-body gallery-body">
+                @if (Items.Count == 0)
+                {
+                    <div class="empty">The item list isn't loaded yet. Start the server once with the Tweaks plugin, or set the Rust game folder in Settings → Hosting.</div>
+                }
+                else
+                {
+                    var shown = Shown().ToList();
+                    if (shown.Count == 0)
+                    {
+                        <div class="empty">No items match.</div>
+                    }
+                    @foreach (var group in shown.GroupBy(i => GroupOf(i)))
+                    {
+                        @if (group.Key.Length > 0)
+                        {
+                            <h3 class="gallery-group">@group.Key</h3>
+                        }
+                        <div class="gallery-grid">
+                            @foreach (var i in group)
+                            {
+                                var item = i;
+                                <button class="gallery-tile" title="@item.Name (@item.Short)@(item.Description.Length > 0 ? "\n" + item.Description : "")" @onclick="() => Pick(item)">
+                                    <img src="api/servers/@ServerId/item-icon/@item.Short" alt="" width="56" height="56" loading="lazy" onerror="this.style.visibility='hidden'" />
+                                    <span>@item.Name</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public int ServerId { get; set; }
+    [Parameter] public List<RustItem> Items { get; set; } = new();
+    [Parameter] public string Title { get; set; } = "Choose an item";
+    [Parameter] public EventCallback<string> OnPick { get; set; }
+
+    private string _category = "Weapon";
+    private string _search = "";
+
+    // Rust's own categories, in the order the in-game crafting menu uses.
+    private static readonly string[] CategoryOrder =
+        { "Weapon", "Ammunition", "Attire", "Medical", "Food", "Resources", "Component", "Tool", "Construction", "Items", "Electrical", "Fun", "Traps", "Misc" };
+
+    private IEnumerable<string> Categories =>
+        Items.Select(i => i.Category).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => Array.IndexOf(CategoryOrder, c) is var n && n < 0 ? 99 : n).ThenBy(c => c);
+
+    private static string CategoryLabel(string c) => c switch { "Weapon" => "Weapons", "Items" => "Deployables", "Fun" => "Fun", _ => c };
+
+    /// <summary>Weapons by how much they're worth handing out, cheapest first. Anything not listed falls in "Other weapons".</summary>
+    private static readonly (string Tier, string[] Items)[] WeaponTiers =
+    {
+        ("Cheap: primitive and melee", new[] { "spear.wooden", "spear.stone", "bow.hunting", "crossbow", "bow.compound", "knife.bone", "knife.butcher", "knife.combat",
+            "salvaged.sword", "machete", "mace", "longsword", "salvaged.cleaver", "paddle", "pitchfork", "skull", "stone.pickaxe", "stonehatchet", "spear.cny", "mace.baseballbat" }),
+        ("Starter guns", new[] { "pistol.eoka", "pistol.nailgun", "shotgun.waterpipe", "pistol.revolver", "shotgun.double", "blunderbuss", "flamethrower" }),
+        ("Mid-tier guns", new[] { "pistol.semiauto", "smg.thompson", "smg.2", "t1_smg", "pistol.python", "shotgun.pump", "rifle.semiauto", "rifle.sks", "pistol.prototype17", "speargun" }),
+        ("Strong guns", new[] { "smg.mp5", "pistol.m92", "rifle.m39", "rifle.bolt", "shotgun.spas12", "rifle.lr300", "rifle.ak", "rifle.ak.ice", "rifle.ak.diver", "rifle.ak.med", "rifle.hmlmg", "hmlmg" }),
+        ("Top tier and explosives", new[] { "rifle.l96", "lmg.m249", "minigun", "rocket.launcher", "multiplegrenadelauncher", "homingmissile.launcher", "grenade.f1", "grenade.beancan", "explosive.satchel", "explosive.timed" }),
+    };
+
+    private static int TierIndex(string shortName)
+    {
+        for (var t = 0; t < WeaponTiers.Length; t++)
+            if (Array.IndexOf(WeaponTiers[t].Items, shortName) >= 0) return t;
+        return WeaponTiers.Length;
+    }
+
+    private string GroupOf(RustItem i)
+    {
+        if (_search.Length > 0) return CategoryLabel(i.Category);
+        if (!string.Equals(i.Category, "Weapon", StringComparison.OrdinalIgnoreCase)) return "";
+        var t = TierIndex(i.Short);
+        return t < WeaponTiers.Length ? WeaponTiers[t].Tier : "Other weapons";
+    }
+
+    private IEnumerable<RustItem> Shown()
+    {
+        var q = _search.Trim();
+        if (q.Length > 0)
+            return Items.Where(i => i.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || i.Short.Contains(q, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(i => Array.IndexOf(CategoryOrder, i.Category) is var n && n < 0 ? 99 : n).ThenBy(i => i.Name).Take(200);
+        var inCat = Items.Where(i => string.Equals(i.Category, _category, StringComparison.OrdinalIgnoreCase));
+        return string.Equals(_category, "Weapon", StringComparison.OrdinalIgnoreCase)
+            ? inCat.OrderBy(i => TierIndex(i.Short)).ThenBy(i => Array.IndexOf(TierItems(i.Short), i.Short)).ThenBy(i => i.Name)
+            : inCat.OrderBy(i => i.Name);
+    }
+
+    private static string[] TierItems(string shortName) => TierIndex(shortName) is var t && t < WeaponTiers.Length ? WeaponTiers[t].Items : Array.Empty<string>();
+
+    private async Task Pick(RustItem i)
+    {
+        await OnPick.InvokeAsync(i.Short);
+        await Close();
+    }
+
+    private Task Close() => VisibleChanged.InvokeAsync(false);
+}

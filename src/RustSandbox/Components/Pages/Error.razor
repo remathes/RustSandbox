@@ -1,0 +1,28 @@
+@page "/error"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@using System.Diagnostics
+
+<PageTitle>Error · Rust Sandbox</PageTitle>
+
+<div class="login">
+    <div class="login-card panel">
+        <div class="panel-body">
+            <h2>Something broke</h2>
+            <p class="dim">The request couldn't be completed. Check the manager's log for details.</p>
+            @if (RequestId is not null)
+            {
+                <p class="muted">Request ID: <code>@RequestId</code></p>
+            }
+            <a class="btn" href="/">Back to dashboard</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+    private string? RequestId;
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

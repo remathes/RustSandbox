@@ -1,0 +1,207 @@
+@page "/servers/new"
+@inject ServerService Servers
+@inject ServerContext Ctx
+@inject NavigationManager Nav
+@inject ToastService Toasts
+@using RustSandbox.Services.Rcon
+
+<PageTitle>Add a server · Rust Sandbox</PageTitle>
+
+<div class="page" style="max-width:900px">
+    <div class="page-head">
+        <div class="grow">
+            <h1>Add a server</h1>
+            <p>Connect to a Rust server that's already running, or have this machine install and run one for you.</p>
+        </div>
+    </div>
+
+    <div class="grid g-2" style="margin-bottom:var(--gap)">
+        <button class="seed-card @(_managed ? "" : "on")" style="padding:16px" @onclick="() => _managed = false">
+            <h3>Connect to an existing server</h3>
+            <p class="muted" style="margin:6px 0 0">Hosted anywhere. You need its IP, RCON port and RCON password. Start/stop happen at your host.</p>
+        </button>
+        <button class="seed-card @(_managed ? "on" : "")" style="padding:16px" @onclick="() => _managed = true">
+            <h3>Run a server on this machine</h3>
+            <p class="muted" style="margin:6px 0 0">The manager installs Rust with SteamCMD, starts and stops it, restarts on crashes and handles wipes.</p>
+        </button>
+    </div>
+
+    <EditForm Model="_s" OnValidSubmit="CreateAsync">
+        <DataAnnotationsValidator />
+        <div class="panel">
+            <div class="panel-head"><h2>Basics</h2></div>
+            <div class="panel-body form-grid">
+                <label class="field">
+                    <span>Name in the manager</span>
+                    <InputText @bind-Value="_name" placeholder="e.g. Main 2x" />
+                </label>
+                <label class="field">
+                    <span>Colour</span>
+                    <input type="color" @bind="_color" style="height:36px;padding:2px" />
+                </label>
+                <label class="field">
+                    <span>Server name shown in the browser</span>
+                    <InputText @bind-Value="_s.Hostname" />
+                </label>
+                <label class="field">
+                    <span>Max players</span>
+                    <InputNumber @bind-Value="_s.MaxPlayers" />
+                </label>
+            </div>
+        </div>
+
+        <div class="panel mt">
+            <div class="panel-head"><h2>RCON connection</h2><span class="spacer"></span><span class="hint">WebRCON must be enabled (+rcon.web 1)</span></div>
+            <div class="panel-body form-grid">
+                <label class="field">
+                    <span>Host / IP</span>
+                    <InputText @bind-Value="_s.RconHost" placeholder="127.0.0.1" />
+                </label>
+                <label class="field">
+                    <span>RCON port</span>
+                    <InputNumber @bind-Value="_s.RconPort" />
+                </label>
+                <label class="field">
+                    <span>RCON password</span>
+                    <InputText @bind-Value="_s.RconPassword" type="password" autocomplete="new-password" />
+                    @if (_managed)
+                    {
+                        <small>We'll launch the server with this password. <a href="javascript:void(0)" @onclick="GeneratePassword">Generate a strong one</a></small>
+                    }
+                </label>
+                <label class="field">
+                    <span>Game port</span>
+                    <InputNumber @bind-Value="_s.Port" />
+                </label>
+                @if (!_managed)
+                {
+                    <div class="wide row">
+                        <button type="button" class="btn" @onclick="TestAsync" disabled="@_testing">@(_testing ? "Testing…" : "Test connection")</button>
+                        @if (_testResult is not null)
+                        {
+                            <span class="@(_testOk ? "good" : "bad")">@_testResult</span>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (_managed)
+        {
+            <div class="panel mt">
+                <div class="panel-head"><h2>On this machine</h2></div>
+                <div class="panel-body form-grid">
+                    <label class="field wide">
+                        <span>Install folder</span>
+                        <InputText @bind-Value="_s.InstallDir" placeholder="@(OperatingSystem.IsWindows() ? "C:\\rust\\server1" : "/home/rust/server1")" />
+                        <small>RustDedicated is installed here. It's created if it doesn't exist.</small>
+                    </label>
+                    <label class="field wide">
+                        <span>SteamCMD</span>
+                        <InputText @bind-Value="_s.SteamCmdPath" placeholder="@(OperatingSystem.IsWindows() ? "C:\\steamcmd\\steamcmd.exe" : "/usr/games/steamcmd")" />
+                        <small>Leave blank and the manager downloads SteamCMD for you the first time it installs Rust.</small>
+                    </label>
+                    <label class="field">
+                        <span>Identity (save folder name)</span>
+                        <InputText @bind-Value="_s.Identity" />
+                        <ValidationMessage For="() => _s.Identity" />
+                    </label>
+                    <label class="field">
+                        <span>Mod framework</span>
+                        <InputSelect @bind-Value="_s.Framework">
+                            <option value="@ModFramework.Oxide">Oxide (uMod)</option>
+                            <option value="@ModFramework.Carbon">Carbon</option>
+                            <option value="@ModFramework.Vanilla">Vanilla — no plugins</option>
+                        </InputSelect>
+                        <small>Kill stats and the live map need Oxide or Carbon.</small>
+                    </label>
+                    <label class="field">
+                        <span>Map size</span>
+                        <InputNumber @bind-Value="_s.WorldSize" />
+                        <small>@SeedLibrary.SizeAdvice(_s.WorldSize)</small>
+                    </label>
+                    <label class="field">
+                        <span>Map seed</span>
+                        <div class="row" style="flex-wrap:nowrap">
+                            <InputNumber @bind-Value="_s.Seed" class="input" />
+                            <button type="button" class="btn icon" title="Random seed" @onclick="() => _s.Seed = SeedLibrary.RandomSeed()"><Icon Name="dice" /></button>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        }
+
+        <div class="row end mt">
+            <a class="btn ghost" href="/">Cancel</a>
+            <button type="submit" class="btn primary" disabled="@_saving">Add server</button>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    private ServerSettings _s = new() { RconPassword = "", Seed = SeedLibrary.RandomSeed() };
+    private string _name = "";
+    private string _color = "#4c8df6";
+    private bool _managed;
+    private bool _saving, _testing, _testOk;
+    private string? _testResult;
+
+    protected override void OnInitialized() => Ctx.Set(null);
+
+    private void GeneratePassword()
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        _s.RconPassword = new string(Enumerable.Range(0, 24).Select(_ => chars[System.Security.Cryptography.RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
+    }
+
+    private async Task TestAsync()
+    {
+        _testing = true;
+        _testResult = null;
+        try
+        {
+            await using var client = new WebRconClient(_s.RconHost, _s.RconPort, _s.RconPassword);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await client.ConnectAsync(cts.Token);
+            var info = RconParsers.ParseServerInfo(await client.SendAsync("serverinfo", TimeSpan.FromSeconds(5)));
+            _testOk = true;
+            _testResult = info is null ? "Connected." : $"Connected to “{info.Hostname}” — {info.Players}/{info.MaxPlayers} players.";
+            if (info is not null && string.IsNullOrWhiteSpace(_name)) _name = info.Hostname.Length > 60 ? info.Hostname[..60] : info.Hostname;
+        }
+        catch (Exception ex)
+        {
+            _testOk = false;
+            _testResult = $"Couldn't connect: {ex.Message}";
+        }
+        finally { _testing = false; }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_managed && string.IsNullOrWhiteSpace(_s.InstallDir))
+        {
+            Toasts.Error("Pick an install folder for the server.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_s.RconPassword))
+        {
+            if (_managed) GeneratePassword();
+            else { Toasts.Error("Enter the server's RCON password."); return; }
+        }
+        _saving = true;
+        try
+        {
+            _s.ManageProcess = _managed;
+            if (_managed) _s.RconHost = "127.0.0.1";
+            var server = await Servers.CreateAsync(new ServerInstance
+            {
+                Name = string.IsNullOrWhiteSpace(_name) ? _s.Hostname : _name.Trim(),
+                Color = _color,
+                Settings = _s,
+            });
+            Toasts.Success($"Added {server.Name}.");
+            Nav.NavigateTo(_managed ? $"s/{server.Id}/settings?tab=hosting" : $"s/{server.Id}");
+        }
+        finally { _saving = false; }
+    }
+}

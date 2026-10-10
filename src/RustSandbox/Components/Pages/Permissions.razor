@@ -1,0 +1,320 @@
+@page "/s/{Id:int}/permissions"
+@inherits ServerPageBase
+@inject PermissionService Perms
+
+<PageTitle>@(Server?.Name ?? "Server") · Permissions</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Groups &amp; permissions</h1>
+                <p>Oxide/Carbon groups and plugin permissions. Changes apply immediately through the server console.</p>
+            </div>
+            <div class="row" style="flex-wrap:nowrap">
+                <input class="input" style="width:230px" list="online-players" placeholder="Player Steam ID" @bind="_lookup" @onkeydown="LookupKey" />
+                <datalist id="online-players">
+                    @foreach (var p in Runtime.Players)
+                    {
+                        <option value="@p.SteamId">@p.Name</option>
+                    }
+                </datalist>
+                <button class="btn" @onclick="() => OpenPlayerAsync(_lookup)"><Icon Name="user" /> Player permissions</button>
+            </div>
+        </div>
+
+        @if (Server.Settings.Framework == ModFramework.Vanilla && !Server.IsDemo)
+        {
+            <div class="callout warn">Permissions come from Oxide or Carbon. This server is set to vanilla in Settings → Hosting.</div>
+        }
+        else if (!Runtime.IsOnline)
+        {
+            <div class="callout warn">The server needs to be online — permissions are read and changed through its console.</div>
+        }
+        else
+        {
+            <div class="grid" style="grid-template-columns:minmax(220px,280px) minmax(0,1fr)">
+                <section class="panel">
+                    <div class="panel-head"><h2>Groups</h2></div>
+                    <div class="panel-body flush">
+                        <ul class="feed">
+                            @foreach (var g in _groups)
+                            {
+                                <li style="cursor:pointer;@(_group?.Name == g && _player is null ? "background:var(--steel-750)" : "")" @onclick="() => OpenGroupAsync(g)">
+                                    <div class="who"><b>@g</b></div>
+                                </li>
+                            }
+                        </ul>
+                        <div class="stack" style="gap:8px;padding:12px 16px;border-top:1px solid var(--steel-750)">
+                            <input class="input" placeholder="New group name, e.g. vip" @bind="_newGroup" />
+                            <button class="btn" @onclick="CreateGroupAsync" disabled="@(string.IsNullOrWhiteSpace(_newGroup) || _busy)"><Icon Name="plus" /> Create group</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    @if (_player is not null)
+                    {
+                        <div class="panel-head">
+                            <h2>@(string.IsNullOrEmpty(_player.Name) ? _player.SteamId : _player.Name)</h2>
+                            <span class="hint">@_player.SteamId</span>
+                            <span class="spacer"></span>
+                            <a class="btn sm ghost" href="s/@Id/players?player=@_player.SteamId">Player page</a>
+                        </div>
+                        <div class="panel-body stack">
+                            <div>
+                                <h3 style="margin-bottom:8px">Groups</h3>
+                                <div class="row">
+                                    @foreach (var g in _groups)
+                                    {
+                                        var member = g.Equals("default", StringComparison.OrdinalIgnoreCase) || _player.Groups.Contains(g);
+                                        <label class="check" style="min-width:150px">
+                                            <input type="checkbox" checked="@member" disabled="@(_busy || g.Equals("default", StringComparison.OrdinalIgnoreCase))" @onchange="e => TogglePlayerGroupAsync(g, e)" />
+                                            <span><b>@g</b></span>
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                            @PermissionGrid(_player.Permissions, _inherited, "user", _player.SteamId)
+                        </div>
+                    }
+                    else if (_group is not null)
+                    {
+                        <div class="panel-head">
+                            <h2>@_group.Name</h2>
+                            <span class="hint">@GroupSummary(_group)</span>
+                            <span class="spacer"></span>
+                            @if (!IsBuiltIn(_group.Name))
+                            {
+                                <button class="btn sm danger" @onclick="() => _deleteOpen = true"><Icon Name="trash" /> Delete group</button>
+                            }
+                        </div>
+                        <div class="panel-body stack">
+                            <div>
+                                <h3 style="margin-bottom:8px">Members</h3>
+                                @if (_group.Name.Equals("default", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <p class="muted" style="margin:0 0 8px">Every player is in the default group automatically.</p>
+                                }
+                                else
+                                {
+                                    <div class="row" style="margin-bottom:8px">
+                                        @foreach (var u in _group.Users)
+                                        {
+                                            <span class="badge" style="padding:4px 4px 4px 10px">
+                                                @(string.IsNullOrEmpty(u.Name) ? u.SteamId : u.Name)
+                                                <button class="btn sm ghost icon" style="height:20px;width:20px" title="Remove from group" @onclick="() => RemoveMemberAsync(u)">✕</button>
+                                            </span>
+                                        }
+                                        @if (_group.Users.Count == 0)
+                                        {
+                                            <span class="muted">No members yet.</span>
+                                        }
+                                    </div>
+                                    <div class="row" style="flex-wrap:nowrap;max-width:460px">
+                                        <input class="input" list="online-players" placeholder="Steam ID (online players are suggested)" @bind="_newMember" />
+                                        <button class="btn" @onclick="AddMemberAsync" disabled="@(string.IsNullOrWhiteSpace(_newMember) || _busy)">Add</button>
+                                    </div>
+                                }
+                            </div>
+                            @PermissionGrid(_group.Permissions, null, "group", _group.Name)
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="empty">
+                            <h3>Pick a group</h3>
+                            <p>Or look up a player by Steam ID to see and change their groups and permissions.</p>
+                        </div>
+                    }
+                </section>
+            </div>
+        }
+    </div>
+
+    <ConfirmDialog @bind-Visible="_deleteOpen" Title="@($"Delete the {_group?.Name} group?")" ConfirmText="Delete group" Danger="true" OnConfirm="DeleteGroupAsync">
+        <p>Members lose the permissions this group gave them.</p>
+    </ConfirmDialog>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "player")] public string? PlayerQuery { get; set; }
+
+    private List<string> _groups = new();
+    private List<string> _allPerms = new();
+    private GroupDetail? _group;
+    private UserPerms? _player;
+    private HashSet<string> _inherited = new(StringComparer.OrdinalIgnoreCase);
+    private string _newGroup = "", _newMember = "", _lookup = "", _permFilter = "";
+    private bool _busy, _deleteOpen;
+    private string? _loadedPlayerQuery;
+
+    private static string GroupSummary(GroupDetail g) =>
+        $"{g.Users.Count} member{(g.Users.Count == 1 ? "" : "s")} · {g.Permissions.Count} permission{(g.Permissions.Count == 1 ? "" : "s")}";
+
+    private static string ShortPerm(string perm, string plugin) =>
+        perm.Length > plugin.Length + 1 && perm.StartsWith(plugin + ".", StringComparison.OrdinalIgnoreCase) ? perm[(plugin.Length + 1)..] : perm;
+
+    private static bool IsBuiltIn(string g) => g.Equals("default", StringComparison.OrdinalIgnoreCase) || g.Equals("admin", StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _group = null;
+        _player = null;
+        await LoadAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await base.OnParametersSetAsync();
+        if (PlayerQuery != _loadedPlayerQuery && Server is not null)
+        {
+            _loadedPlayerQuery = PlayerQuery;
+            if (!string.IsNullOrEmpty(PlayerQuery)) { _lookup = PlayerQuery; await OpenPlayerAsync(PlayerQuery); }
+        }
+    }
+
+    protected override Task OnLiveRefreshAsync() => Task.CompletedTask;
+
+    private async Task LoadAsync()
+    {
+        if (Server is null || !Runtime.IsOnline) return;
+        try
+        {
+            _groups = await Perms.GroupsAsync(Server);
+            _allPerms = await Perms.AllPermissionsAsync(Server);
+            if (_group is null && _player is null && _groups.Count > 0) await OpenGroupAsync(_groups.FirstOrDefault(g => g.Equals("admin", StringComparison.OrdinalIgnoreCase)) ?? _groups[0]);
+        }
+        catch (Exception ex) { Toasts.Error(ex.Message); }
+    }
+
+    private async Task OpenGroupAsync(string name)
+    {
+        _player = null;
+        try { _group = await Perms.GroupAsync(Server!, name); }
+        catch (Exception ex) { Toasts.Error(ex.Message); }
+    }
+
+    private async Task OpenPlayerAsync(string? steamId)
+    {
+        steamId = steamId?.Trim();
+        if (string.IsNullOrEmpty(steamId) || steamId.Length != 17 || !steamId.All(char.IsDigit)) { Toasts.Error("Enter a 17-digit Steam ID."); return; }
+        try
+        {
+            _player = await Perms.UserAsync(Server!, steamId);
+            if (string.IsNullOrEmpty(_player.Name)) _player.Name = Runtime.Players.FirstOrDefault(p => p.SteamId == steamId)?.Name ?? "";
+            _inherited = new(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in _player.Groups.Append("default").Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var detail = await Perms.GroupAsync(Server!, g);
+                _inherited.UnionWith(detail.Permissions);
+            }
+        }
+        catch (Exception ex) { Toasts.Error(ex.Message); }
+    }
+
+    private async Task LookupKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await OpenPlayerAsync(_lookup);
+    }
+
+    private async Task Run(Func<Task<string?>> action, string success, Func<Task> refresh)
+    {
+        _busy = true;
+        try
+        {
+            string? err;
+            try { err = await action(); }
+            catch (Exception ex) { err = ex.Message; }
+            if (err is null) Toasts.Success(success); else Toasts.Error(err);
+            await refresh();
+        }
+        finally { _busy = false; }
+    }
+
+    private Task CreateGroupAsync()
+    {
+        var name = _newGroup.Trim().ToLowerInvariant();
+        _newGroup = "";
+        return Run(() => Perms.CreateGroupAsync(Server!, name, name), $"Created group {name}.", async () => { await LoadAsync(); await OpenGroupAsync(name); });
+    }
+
+    private Task DeleteGroupAsync()
+    {
+        var name = _group!.Name;
+        _group = null;
+        return Run(() => Perms.DeleteGroupAsync(Server!, name), $"Deleted group {name}.", LoadAsync);
+    }
+
+    private Task AddMemberAsync()
+    {
+        var id = _newMember.Trim();
+        _newMember = "";
+        var g = _group!.Name;
+        return Run(() => Perms.AddToGroupAsync(Server!, id, g), $"Added to {g}.", () => OpenGroupAsync(g));
+    }
+
+    private Task RemoveMemberAsync(PermUser u)
+    {
+        var g = _group!.Name;
+        return Run(() => Perms.RemoveFromGroupAsync(Server!, u.SteamId, g), $"Removed {(string.IsNullOrEmpty(u.Name) ? u.SteamId : u.Name)} from {g}.", () => OpenGroupAsync(g));
+    }
+
+    private Task TogglePlayerGroupAsync(string group, ChangeEventArgs e)
+    {
+        var on = e.Value is true || (e.Value is string s && bool.TryParse(s, out var b) && b);
+        var id = _player!.SteamId;
+        return Run(() => on ? Perms.AddToGroupAsync(Server!, id, group) : Perms.RemoveFromGroupAsync(Server!, id, group),
+            on ? $"Added to {group}." : $"Removed from {group}.", () => OpenPlayerAsync(id));
+    }
+
+    private Task TogglePermAsync(string kind, string target, string perm, ChangeEventArgs e)
+    {
+        var on = e.Value is true || (e.Value is string s && bool.TryParse(s, out var b) && b);
+        return Run(() => Perms.SetPermissionAsync(Server!, kind, target, perm, on), on ? $"Granted {perm}." : $"Revoked {perm}.",
+            () => kind == "user" ? OpenPlayerAsync(target) : OpenGroupAsync(target));
+    }
+
+    /// <summary>Permissions grouped by plugin, as checkboxes.</summary>
+    private RenderFragment PermissionGrid(HashSet<string> granted, HashSet<string>? inherited, string kind, string target) => __builder =>
+    {
+        var perms = _allPerms.Union(granted, StringComparer.OrdinalIgnoreCase)
+            .Where(p => string.IsNullOrWhiteSpace(_permFilter) || p.Contains(_permFilter, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(p => p.Split('.')[0], StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key);
+        <div>
+            <div class="row" style="margin-bottom:10px">
+                <h3>Permissions</h3>
+                <span class="spacer" style="flex:1"></span>
+                <input class="input" style="max-width:240px;min-height:30px;padding:4px 10px" placeholder="Filter permissions" @bind="_permFilter" @bind:event="oninput" />
+            </div>
+            @if (_allPerms.Count == 0)
+            {
+                <p class="muted">The server didn't list any permissions. Plugins register theirs when they load.</p>
+            }
+            <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+                @foreach (var group in perms)
+                {
+                    <div class="panel inset" style="padding:10px 12px">
+                        <div style="font-weight:600;margin-bottom:6px">@group.Key</div>
+                        @foreach (var perm in group.OrderBy(p => p))
+                        {
+                            var has = granted.Contains(perm);
+                            var viaGroup = !has && inherited is not null && inherited.Contains(perm);
+                            <label class="check" style="margin:4px 0">
+                                <input type="checkbox" checked="@has" disabled="@_busy" @onchange="e => TogglePermAsync(kind, target, perm, e)" />
+                                <span><b style="font-weight:400">@ShortPerm(perm, group.Key)</b>
+                                @if (viaGroup)
+                                {
+                                    <small class="good">from a group</small>
+                                }
+                                </span>
+                            </label>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    };
+}

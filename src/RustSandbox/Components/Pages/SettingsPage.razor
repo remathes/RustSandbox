@@ -1,0 +1,434 @@
+@page "/s/{Id:int}/settings"
+@inherits ServerPageBase
+@inject DiscordNotifier Discord
+@inject IJSRuntime JS
+
+<PageTitle>@(Server?.Name ?? "Server") · Settings</PageTitle>
+
+@if (Server is not null && _s is not null)
+{
+    <div class="page" style="max-width:1100px">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Server settings</h1>
+                <p>Changes to launch options apply the next time the server starts. RCON changes reconnect straight away.</p>
+            </div>
+            @if (Dirty)
+            {
+                <span class="badge warn">Unsaved changes</span>
+                <button class="btn ghost" @onclick="Revert">Discard</button>
+            }
+            <button class="btn primary" @onclick="SaveAsync" disabled="@(!Dirty || _saving)">Save changes</button>
+        </div>
+
+        <div class="tabs" role="tablist">
+            @foreach (var (key, label) in Tabs)
+            {
+                <button role="tab" class="@(_tab == key ? "on" : "")" aria-selected="@(_tab == key ? "true" : "false")" @onclick="() => _tab = key">@label</button>
+            }
+        </div>
+
+        @switch (_tab)
+        {
+            case "general":
+                <section class="panel">
+                    <div class="panel-body form-grid">
+                        <label class="field"><span>Name in the manager</span><input class="input" @bind="_name" @bind:event="oninput" /></label>
+                        <label class="field"><span>Colour</span><input type="color" @bind="_color" @bind:event="oninput" style="height:36px;padding:2px" /></label>
+                        <label class="field wide"><span>Server name in the browser</span><input class="input" @bind="_s.Hostname" @bind:event="oninput" maxlength="128" /></label>
+                        <label class="field wide"><span>Description</span><textarea class="input" rows="4" @bind="_s.Description" @bind:event="oninput"></textarea><small>Shown on the server's info page. Line breaks are kept.</small></label>
+                        <label class="field"><span>Website URL</span><input class="input" @bind="_s.Url" @bind:event="oninput" placeholder="https://" /></label>
+                        <label class="field"><span>Header image URL</span><input class="input" @bind="_s.HeaderImage" @bind:event="oninput" placeholder="512×256 PNG or JPG" /></label>
+                        <label class="field"><span>Logo image URL</span><input class="input" @bind="_s.LogoImage" @bind:event="oninput" /></label>
+                        <label class="field"><span>Tags</span><input class="input" @bind="_s.Tags" @bind:event="oninput" placeholder="monthly,vanilla,NA" /><small>Comma separated. Used by the server browser filters.</small></label>
+                        <label class="field"><span>Max players</span><input class="input" type="number" min="1" max="1000" @bind="_s.MaxPlayers" @bind:event="oninput" /></label>
+                    </div>
+                </section>
+                break;
+
+            case "network":
+                <section class="panel">
+                    <div class="panel-head"><h2>RCON</h2><span class="spacer"></span><span class="hint">How the manager talks to the server</span></div>
+                    <div class="panel-body form-grid">
+                        <label class="field"><span>RCON host</span><input class="input" @bind="_s.RconHost" @bind:event="oninput" /><small>127.0.0.1 if the server runs on this machine.</small></label>
+                        <label class="field"><span>RCON port</span><input class="input" type="number" @bind="_s.RconPort" @bind:event="oninput" /></label>
+                        <label class="field">
+                            <span>RCON password</span>
+                            <div class="row" style="flex-wrap:nowrap">
+                                <input class="input" type="@(_showPw ? "text" : "password")" @bind="_s.RconPassword" @bind:event="oninput" autocomplete="new-password" />
+                                <button class="btn" @onclick="() => _showPw = !_showPw">@(_showPw ? "Hide" : "Show")</button>
+                            </div>
+                        </label>
+                    </div>
+                </section>
+                <section class="panel mt">
+                    <div class="panel-head"><h2>Ports</h2></div>
+                    <div class="panel-body form-grid">
+                        <label class="field wide">
+                            <span>Public address players join with</span>
+                            <input class="input" @bind="_s.PublicAddress" @bind:event="oninput" placeholder="Your public IP or domain, e.g. play.myserver.com" />
+                            <small>Powers the “Join game” button. Leave blank to use the RCON host. Add :port only if players use a different port than the game port.</small>
+                        </label>
+                        <label class="field"><span>Bind IP</span><input class="input" @bind="_s.ServerIp" @bind:event="oninput" /></label>
+                        <label class="field"><span>Game port (UDP)</span><input class="input" type="number" @bind="_s.Port" @bind:event="oninput" /></label>
+                        <label class="field"><span>Query port</span><input class="input" type="number" @bind="_s.QueryPort" @bind:event="oninput" /></label>
+                        <label class="field"><span>Rust+ app port</span><input class="input" type="number" @bind="_s.AppPort" @bind:event="oninput" /><small>-1 turns the companion app off.</small></label>
+                    </div>
+                </section>
+                break;
+
+            case "world":
+                <section class="panel">
+                    <div class="panel-body form-grid">
+                        <label class="field">
+                            <span>Map</span>
+                            <select @bind="_s.MapMode">
+                                <option value="@MapMode.Procedural">Procedural (seed + size)</option>
+                                <option value="@MapMode.CustomMap">Custom map from URL</option>
+                                <option value="@MapMode.Barren">Barren</option>
+                                <option value="@MapMode.HapisIsland">Hapis Island</option>
+                                <option value="@MapMode.CraggyIsland">Craggy Island</option>
+                                <option value="@MapMode.SavasIsland">Savas Island</option>
+                            </select>
+                        </label>
+                        @if (_s.MapMode is MapMode.Procedural or MapMode.Barren)
+                        {
+                            <label class="field">
+                                <span>Seed</span>
+                                <div class="row" style="flex-wrap:nowrap">
+                                    <input class="input" type="number" min="0" @bind="_s.Seed" @bind:event="oninput" />
+                                    <button class="btn icon" title="Random seed" @onclick="() => _s.Seed = SeedLibrary.RandomSeed()"><Icon Name="dice" /></button>
+                                </div>
+                            </label>
+                            <label class="field">
+                                <span>World size: <b>@_s.WorldSize</b></span>
+                                <input type="range" min="1000" max="6000" step="50" @bind="_s.WorldSize" @bind:event="oninput" />
+                                <small>@SeedLibrary.SizeAdvice(_s.WorldSize)</small>
+                            </label>
+                            <div class="field wide">
+                                <div class="row">
+                                    <a class="btn" href="maps?seed=@_s.Seed&size=@_s.WorldSize"><Icon Name="seed" /> Preview in map generator</a>
+                                    <a class="btn ghost" href="@_s.RustMapsUrl" target="_blank" rel="noopener"><Icon Name="external" /> View on RustMaps</a>
+                                </div>
+                                <small>Changing the seed or size only takes effect after a map wipe.</small>
+                            </div>
+                        }
+                        else if (_s.MapMode == MapMode.CustomMap)
+                        {
+                            <label class="field wide"><span>Map file URL (.map)</span><input class="input" @bind="_s.LevelUrl" @bind:event="oninput" placeholder="https://…/mymap.map" /><small>Must be a direct download link players can reach.</small></label>
+                        }
+                        <label class="field wide">
+                            <span>Live map image (optional)</span>
+                            <input class="input" @bind="_s.MapImageUrl" @bind:event="oninput" placeholder="https://… map image, top-down, north up" />
+                            <small>Filled in automatically from the server log when the server starts (it uploads its map image to Facepunch). You can also paste your own top-down image. Without one the manager draws a generated preview.</small>
+                        </label>
+                    </div>
+                </section>
+                break;
+
+            case "gameplay":
+                <section class="panel">
+                    <div class="panel-body form-grid">
+                        <label class="check"><input type="checkbox" @bind="_s.Pve" /><span><b>PvE mode</b><small>Players can't damage each other.</small></span></label>
+                        <label class="check"><input type="checkbox" @bind="_s.Radiation" /><span><b>Radiation</b><small>Monuments are irradiated.</small></span></label>
+                        <label class="check"><input type="checkbox" @bind="_s.Stability" /><span><b>Building stability</b><small>Off allows floating builds.</small></span></label>
+                        <label class="check"><input type="checkbox" @bind="_s.Secure" /><span><b>Easy Anti-Cheat</b><small>Turning it off delists you from the main browser.</small></span></label>
+                        <label class="field"><span>Decay scale: <b>@_s.DecayScale.ToString("0.##")</b></span><input type="range" min="0" max="2" step="0.05" @bind="_s.DecayScale" @bind:event="oninput" /><small>0 disables decay, 1 is vanilla.</small></label>
+                        <label class="field"><span>Save interval (seconds)</span><input class="input" type="number" min="10" @bind="_s.SaveInterval" @bind:event="oninput" /></label>
+                        <label class="field"><span>Tick rate</span><input class="input" type="number" min="10" max="128" @bind="_s.TickRate" @bind:event="oninput" /></label>
+                        <label class="field"><span>FPS limit</span><input class="input" type="number" @bind="_s.FpsLimit" @bind:event="oninput" /></label>
+                    </div>
+                </section>
+                <section class="panel mt">
+                    <div class="panel-head">
+                        <h2>Custom convars</h2>
+                        <span class="spacer"></span>
+                        <button class="btn sm" @onclick="() => _s.CustomConvars.Add(new ConvarEntry())"><Icon Name="plus" /> Add</button>
+                    </div>
+                    <div class="panel-body stack" style="gap:8px">
+                        @if (_s.CustomConvars.Count == 0)
+                        {
+                            <p class="muted" style="margin:0">Anything else to pass on launch, e.g. <code>server.pvesettings</code> or <code>craft.instant</code>. A custom value replaces a built-in one with the same name.</p>
+                        }
+                        @foreach (var c in _s.CustomConvars)
+                        {
+                            <div class="row" style="flex-wrap:nowrap">
+                                <input class="input mono" placeholder="convar.name" @bind="c.Key" @bind:event="oninput" />
+                                <input class="input mono" placeholder="value" @bind="c.Value" @bind:event="oninput" />
+                                <button class="btn icon ghost" title="Remove" @onclick="() => _s.CustomConvars.Remove(c)"><Icon Name="trash" /></button>
+                            </div>
+                        }
+                    </div>
+                </section>
+                break;
+
+            case "hosting":
+                <section class="panel">
+                    <div class="panel-body stack">
+                        <label class="check">
+                            <input type="checkbox" @bind="_s.ManageProcess" disabled="@Server.IsDemo" />
+                            <span><b>Run the server process on this machine</b><small>The manager starts, stops and restarts RustDedicated, updates it with SteamCMD and handles wipes. Leave off for servers hosted elsewhere.</small></span>
+                        </label>
+                        @if (_s.ManageProcess)
+                        {
+                            <div class="form-grid">
+                                <label class="field wide"><span>Install folder</span><input class="input" @bind="_s.InstallDir" @bind:event="oninput" /></label>
+                                <label class="field wide"><span>SteamCMD path</span><input class="input" @bind="_s.SteamCmdPath" @bind:event="oninput" placeholder="Leave blank — the manager downloads SteamCMD itself" /></label>
+                                <label class="field wide">
+                                    <span>Rust game folder (optional)</span>
+                                    <input class="input" @bind="_s.RustClientDir" @bind:event="oninput" placeholder="@(ItemCatalog.DetectClientDir() ?? "e.g. D:\\Steam\\steamapps\\common\\Rust")" />
+                                    <small>Your Rust game install. Used for item icons and stack sizes on Rates &amp; stacks. Leave blank to find it automatically@(ItemCatalog.DetectClientDir() is { } found ? $" (found {found})" : "").</small>
+                                </label>
+                                <label class="field"><span>Identity (save folder)</span><input class="input" @bind="_s.Identity" @bind:event="oninput" /></label>
+                                <label class="field"><span>Steam branch</span><input class="input" @bind="_s.Branch" @bind:event="oninput" placeholder="blank for public, or staging / aux01" /></label>
+                                <label class="field">
+                                    <span>Mod framework</span>
+                                    <select @bind="_s.Framework">
+                                        <option value="@ModFramework.Oxide">Oxide (uMod)</option>
+                                        <option value="@ModFramework.Carbon">Carbon</option>
+                                        <option value="@ModFramework.Vanilla">Vanilla</option>
+                                    </select>
+                                </label>
+                                <label class="field wide"><span>Extra launch arguments</span><input class="input mono" @bind="_s.ExtraArgs" @bind:event="oninput" placeholder="-logfile output.txt" /></label>
+                                <label class="check"><input type="checkbox" @bind="_s.AutoRestartOnCrash" /><span><b>Restart after a crash</b><small>Paused if it crashes more than 3 times in 15 minutes.</small></span></label>
+                                <label class="check"><input type="checkbox" @bind="_s.AutoStartWithManager" /><span><b>Start when the manager starts</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="_s.AutoUpdate" /><span><b>Install updates automatically</b><small>When a new Rust build or @_s.Framework release is found: warn players, stop, update, start.</small></span></label>
+                                <label class="field"><span>Warning before an update (minutes)</span><input class="input" type="number" min="0" max="60" @bind="_s.UpdateWarnMinutes" @bind:event="oninput" /></label>
+                            </div>
+                            <div class="row">
+                                <button class="btn" @onclick="UpdateServerAsync" disabled="@(_busy || Dirty)"><Icon Name="download" /> Install / update Rust</button>
+                                <button class="btn" @onclick="InstallFrameworkAsync" disabled="@(_busy || Dirty || _s.Framework == ModFramework.Vanilla)">Install / update @_s.Framework</button>
+                                @if (Dirty)
+                                {
+                                    <span class="muted" style="font-size:13px">Save changes first.</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                </section>
+                <section class="panel mt">
+                    <div class="panel-head">
+                        <h2>Launch command</h2>
+                        <span class="spacer"></span>
+                        <button class="btn sm" @onclick="CopyLaunchAsync"><Icon Name="copy" /> Copy</button>
+                    </div>
+                    <div class="panel-body">
+                        <div class="codebox">@LaunchArguments.ExecutablePath(_s) @LaunchArguments.Build(_s, maskPassword: true)</div>
+                        <small class="help">Copy includes the real RCON password. Use this to run the server yourself or from a host's startup line.</small>
+                    </div>
+                </section>
+                break;
+
+            case "notifications":
+                <section class="panel">
+                    <div class="panel-body stack">
+                        <label class="field">
+                            <span>Discord webhook URL</span>
+                            <div class="row" style="flex-wrap:nowrap">
+                                <input class="input" @bind="_s.DiscordWebhookUrl" @bind:event="oninput" placeholder="https://discord.com/api/webhooks/…" />
+                                <button class="btn" @onclick="TestWebhookAsync" disabled="@(string.IsNullOrWhiteSpace(_s.DiscordWebhookUrl))">Send test</button>
+                            </div>
+                            <small>In Discord: channel settings → Integrations → Webhooks → New webhook → Copy URL.</small>
+                        </label>
+                        <label class="check"><input type="checkbox" @bind="_s.NotifyStatusChanges" /><span><b>Server status</b><small>Online, offline, crashes, restarts and wipes.</small></span></label>
+                        <label class="check"><input type="checkbox" @bind="_s.NotifyLongKills" /><span><b>Long-range kills</b><small>Post PvP kills longer than the distance below.</small></span></label>
+                        @if (_s.NotifyLongKills)
+                        {
+                            <label class="field" style="max-width:240px"><span>Minimum distance (m)</span><input class="input" type="number" min="50" @bind="_s.LongKillMeters" @bind:event="oninput" /></label>
+                        }
+                    </div>
+                </section>
+                break;
+
+            case "danger":
+                <section class="panel" style="border-color:rgba(224,88,76,.4)">
+                    <div class="panel-body stack">
+                        @if (_s.ManageProcess && !Server.IsDemo)
+                        {
+                            <div class="row">
+                                <div class="grow" style="flex:1;min-width:240px">
+                                    <b>Wipe now</b>
+                                    <div class="muted" style="font-size:13.5px">Save files are moved to a wipe-backups folder, not deleted. Players get a countdown first.</div>
+                                </div>
+                                <button class="btn danger" @onclick='() => OpenWipe(false)'><Icon Name="wipe" /> Map wipe</button>
+                                <button class="btn danger" @onclick='() => OpenWipe(true)'>Full wipe</button>
+                            </div>
+                        }
+                        <div class="row">
+                            <div class="grow" style="flex:1;min-width:240px">
+                                <b>Clear recorded stats</b>
+                                <div class="muted" style="font-size:13.5px">Removes kills, heat-map positions and weapon usage for this server. Handy after a wipe.</div>
+                            </div>
+                            <button class="btn danger" @onclick="() => _clearOpen = true">Clear stats</button>
+                        </div>
+                        <div class="row">
+                            <div class="grow" style="flex:1;min-width:240px">
+                                <b>Remove from the manager</b>
+                                <div class="muted" style="font-size:13.5px">Deletes this server's settings and history here. Files on disk and the server itself are untouched.</div>
+                            </div>
+                            <button class="btn danger" @onclick="() => _deleteOpen = true"><Icon Name="trash" /> Remove server</button>
+                        </div>
+                    </div>
+                </section>
+                break;
+        }
+    </div>
+
+    <ConfirmDialog @bind-Visible="_deleteOpen" Title="@($"Remove {Server.Name}?")" ConfirmText="Remove server" Danger="true" RequireText="@Server.Name" OnConfirm="DeleteAsync">
+        <p>All of its stats, schedules and settings are deleted from the manager.</p>
+    </ConfirmDialog>
+    <ConfirmDialog @bind-Visible="_clearOpen" Title="Clear all recorded stats?" ConfirmText="Clear stats" Danger="true" OnConfirm="ClearStatsAsync">
+        <p>Kills, deaths, positions and weapon usage for this server are deleted. This can't be undone.</p>
+    </ConfirmDialog>
+    <ConfirmDialog @bind-Visible="_wipeOpen" Title="@(_wipeFull ? "Full wipe (map + blueprints)" : "Map wipe")" ConfirmText="Start wipe" Danger="true" RequireText="@Server.Name" OnConfirm="WipeAsync">
+        <p>The server counts down, stops, wipes and starts again on a fresh map.</p>
+        <div class="form-grid" style="margin-top:10px">
+            <label class="field">
+                <span>Warning time (minutes)</span>
+                <input class="input" type="number" min="0" max="60" @bind="_wipeWarn" />
+            </label>
+            <label class="check" style="align-self:end"><input type="checkbox" @bind="_wipeNewSeed" /><span><b>New random seed</b></span></label>
+        </div>
+    </ConfirmDialog>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+
+    private static readonly (string, string)[] Tabs =
+    {
+        ("general", "General"), ("network", "Network & RCON"), ("world", "World"), ("gameplay", "Gameplay"),
+        ("hosting", "Hosting"), ("notifications", "Notifications"), ("danger", "Danger zone"),
+    };
+
+    private ServerSettings? _s;
+    private string _original = "";
+    private string _name = "", _color = "", _origName = "", _origColor = "";
+    private string _tab = "general";
+    private bool _saving, _busy, _showPw, _deleteOpen, _clearOpen, _wipeOpen, _wipeFull, _wipeNewSeed = true;
+    private int _wipeWarn = 5;
+
+    private bool Dirty => _s is not null &&
+        (System.Text.Json.JsonSerializer.Serialize(_s, ServerSettings.JsonOptions) != _original || _name != _origName || _color != _origColor);
+
+    protected override Task OnServerChangedAsync()
+    {
+        if (!string.IsNullOrEmpty(TabQuery) && Tabs.Any(t => t.Item1 == TabQuery)) _tab = TabQuery;
+        Revert();
+        return Task.CompletedTask;
+    }
+
+    protected override Task OnLiveRefreshAsync()
+    {
+        // Don't re-render the form on every status tick while someone is typing.
+        return Task.CompletedTask;
+    }
+
+    private void Revert()
+    {
+        if (Server is null) return;
+        _s = Server.Settings.Clone();
+        _original = System.Text.Json.JsonSerializer.Serialize(_s, ServerSettings.JsonOptions);
+        _name = _origName = Server.Name;
+        _color = _origColor = Server.Color;
+    }
+
+    private string? Validate()
+    {
+        if (_s is null) return "Nothing to save.";
+        if (string.IsNullOrWhiteSpace(_name)) return "Give the server a name.";
+        if (string.IsNullOrWhiteSpace(_s.Hostname)) return "The browser name can't be empty.";
+        if (!System.Text.RegularExpressions.Regex.IsMatch(_s.Identity ?? "", "^[A-Za-z0-9_-]+$")) return "Identity can only contain letters, numbers, - and _.";
+        if (_s.WorldSize is < 1000 or > 6000) return "World size must be between 1000 and 6000.";
+        if (_s.Seed < 0) return "Seed must be a positive number.";
+        var ports = new[] { _s.Port, _s.QueryPort, _s.RconPort }.Concat(_s.AppPort > 0 ? new[] { _s.AppPort } : Array.Empty<int>()).ToList();
+        if (ports.Any(p => p is < 1 or > 65535)) return "Ports must be between 1 and 65535.";
+        if (ports.Distinct().Count() != ports.Count) return "Game, query, RCON and app ports must all be different.";
+        if (_s.ManageProcess && string.IsNullOrWhiteSpace(_s.InstallDir)) return "Set an install folder, or turn off “Run the server process on this machine”.";
+        return null;
+    }
+
+    private async Task SaveAsync()
+    {
+        var error = Validate();
+        if (error is not null) { Toasts.Error(error); return; }
+        _saving = true;
+        try
+        {
+            var server = (await Servers.GetAsync(Id))!;
+            server.Name = _name.Trim();
+            server.Color = _color;
+            server.Settings = _s!.Clone();
+            await Servers.SaveAsync(server);
+            await ReloadServerAsync();
+            Revert();
+            Toasts.Success("Settings saved.");
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task CopyLaunchAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("RSM.copy", $"{LaunchArguments.ExecutablePath(_s!)} {LaunchArguments.Build(_s!)}");
+            Toasts.Success("Launch command copied.");
+        }
+        catch (JSException) { Toasts.Error("Couldn't access the clipboard."); }
+    }
+
+    private async Task TestWebhookAsync()
+    {
+        var err = await Discord.TestAsync(_s!.DiscordWebhookUrl, _name);
+        Toasts.Result(err is null ? null : $"Webhook test failed: {err}", "Test message sent — check your Discord channel.");
+    }
+
+    private async Task UpdateServerAsync()
+    {
+        _busy = true;
+        Toasts.Show("Updating with SteamCMD — follow along in the console.");
+        try { Toasts.Result(await Processes.UpdateServerAsync(Server!), "Rust is installed and up to date."); }
+        finally { _busy = false; }
+    }
+
+    private async Task InstallFrameworkAsync()
+    {
+        _busy = true;
+        try { Toasts.Result(await Processes.InstallFrameworkAsync(Server!), $"{_s!.Framework} installed."); }
+        finally { _busy = false; }
+    }
+
+    private void OpenWipe(bool full)
+    {
+        _wipeFull = full;
+        _wipeOpen = true;
+    }
+
+    private Task WipeAsync()
+    {
+        var server = Server!;
+        var (full, seed, warn) = (_wipeFull, _wipeNewSeed, _wipeWarn);
+        _ = Task.Run(async () =>
+        {
+            var err = await Processes.WipeAsync(server, full, seed, warn);
+            await InvokeAsync(() => Toasts.Result(err, "Wipe complete — the server is starting on a fresh map."));
+        });
+        Toasts.Show(warn > 0 ? $"Wipe countdown started ({warn} min)." : "Wiping now.");
+        return Task.CompletedTask;
+    }
+
+    private async Task ClearStatsAsync()
+    {
+        var n = await Servers.ClearStatsAsync(Id);
+        Toasts.Success($"Cleared {n:N0} records.");
+    }
+
+    private async Task DeleteAsync()
+    {
+        var name = Server!.Name;
+        await Servers.DeleteAsync(Id);
+        Context.Set(null);
+        Toasts.Success($"Removed {name}.");
+        Nav.NavigateTo("/");
+    }
+}

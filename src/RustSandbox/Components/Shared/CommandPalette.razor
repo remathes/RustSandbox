@@ -1,0 +1,157 @@
+@implements IAsyncDisposable
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ServerContext Ctx
+@inject ServerConnectionManager Conn
+@inject ToastService Toasts
+
+@if (_open)
+{
+    <div class="backdrop" @onclick="Close">
+        <div class="modal palette" role="dialog" aria-modal="true" aria-label="Jump to" @onclick:stopPropagation="true">
+            <input @ref="_input" placeholder="Jump to a page or server — start with > to run a console command" value="@_query"
+                   @oninput="e => { _query = e.Value?.ToString() ?? string.Empty; _index = 0; }" @onkeydown="OnKey" aria-label="Search" />
+            @{ var items = Filtered(); }
+            @if (items.Count == 0)
+            {
+                <div class="empty">Nothing matches “@_query”.</div>
+            }
+            else
+            {
+                <ul>
+                    @for (var i = 0; i < items.Count; i++)
+                    {
+                        var item = items[i];
+                        var idx = i;
+                        <li><button class="@(idx == _index ? "on" : "")" @onclick="() => Run(item)" @onmouseover="() => _index = idx">@item.Label <span>@item.Hint</span></button></li>
+                    }
+                </ul>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public List<ServerInstance> Servers { get; set; } = new();
+
+    private sealed record Item(string Label, string Hint, string? Url, Func<Task>? Action = null);
+
+    private bool _open;
+    private bool _focus;
+    private string _query = "";
+    private int _index;
+    private ElementReference _input;
+    private DotNetObjectReference<CommandPalette>? _ref;
+
+    [JSInvokable]
+    public Task OpenPalette() => InvokeAsync(Open);
+
+    public void Open()
+    {
+        _open = true;
+        _query = "";
+        _index = 0;
+        _focus = true;
+        StateHasChanged();
+    }
+
+    private void Close() => _open = false;
+
+    private List<Item> All()
+    {
+        var list = new List<Item>();
+        var current = Servers.FirstOrDefault(s => s.Id == Ctx.ServerId);
+        if (current is not null)
+        {
+            var b = $"s/{current.Id}";
+            list.Add(new Item("Dashboard", current.Name, b));
+            list.Add(new Item("Console", current.Name, $"{b}/console"));
+            list.Add(new Item("Players", current.Name, $"{b}/players"));
+            list.Add(new Item("Live map", current.Name, $"{b}/map"));
+            list.Add(new Item("Combat stats", current.Name, $"{b}/combat"));
+            list.Add(new Item("Gathering", current.Name, $"{b}/gathering"));
+            list.Add(new Item("Plugins", current.Name, $"{b}/plugins"));
+            list.Add(new Item("Groups & permissions", current.Name, $"{b}/permissions"));
+            list.Add(new Item("Bans & staff", current.Name, $"{b}/players"));
+            list.Add(new Item("Schedules", current.Name, $"{b}/schedules"));
+            list.Add(new Item("Plugin & telemetry", current.Name, $"{b}/telemetry"));
+            list.Add(new Item("Server settings", current.Name, $"{b}/settings"));
+        }
+        foreach (var s in Servers.Where(s => s.Id != Ctx.ServerId))
+            list.Add(new Item($"Switch to {s.Name}", "Server", $"s/{s.Id}"));
+        list.Add(new Item("All servers", "Manager", ""));
+        list.Add(new Item("Map generator", "Manager", "maps"));
+        list.Add(new Item("Add a server", "Manager", "servers/new"));
+        list.Add(new Item("Preferences", "Manager", "preferences"));
+        return list;
+    }
+
+    private List<Item> Filtered()
+    {
+        var q = _query.Trim();
+        if (q.StartsWith('>'))
+        {
+            var cmd = q[1..].Trim();
+            var current = Servers.FirstOrDefault(s => s.Id == Ctx.ServerId);
+            if (current is null) return new() { new Item("Pick a server first", "", null) };
+            if (cmd.Length == 0) return new() { new Item("Type a console command", current.Name, null) };
+            return new()
+            {
+                new Item($"Run “{cmd}”", $"on {current.Name}", $"s/{current.Id}/console", async () =>
+                {
+                    await Conn.ExecuteAsync(current.Id, cmd);
+                    Toasts.Success($"Sent “{cmd}”");
+                }),
+            };
+        }
+        var all = All();
+        if (q.Length == 0) return all;
+        return all.Where(i => i.Label.Contains(q, StringComparison.OrdinalIgnoreCase) || i.Hint.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private async Task Run(Item item)
+    {
+        _open = false;
+        if (item.Url is not null) Nav.NavigateTo(item.Url);
+        if (item.Action is not null) await item.Action();
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        var items = Filtered();
+        switch (e.Key)
+        {
+            case "ArrowDown": _index = items.Count == 0 ? 0 : (_index + 1) % items.Count; break;
+            case "ArrowUp": _index = items.Count == 0 ? 0 : (_index - 1 + items.Count) % items.Count; break;
+            case "Escape": _open = false; break;
+            case "Enter":
+                if (items.Count > 0) await Run(items[Math.Clamp(_index, 0, items.Count - 1)]);
+                break;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _ref = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("RSM.registerHotkeys", _ref); } catch (JSDisconnectedException) { }
+        }
+        if (_focus && _open)
+        {
+            _focus = false;
+            try { await JS.InvokeVoidAsync("RSM.focus", _input); } catch (JSException) { }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        // Only talk to the browser if we ever registered (not during server-side prerendering).
+        if (_ref is null) return;
+        try { await JS.InvokeVoidAsync("RSM.unregisterHotkeys"); }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+        catch (InvalidOperationException) { }
+        _ref.Dispose();
+    }
+}

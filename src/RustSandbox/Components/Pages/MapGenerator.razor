@@ -1,0 +1,285 @@
+@page "/maps"
+@implements IDisposable
+@inject IJSRuntime JS
+@inject SeedLibrary Library
+@inject ServerService Servers
+@inject ServerContext Ctx
+@inject ToastService Toasts
+@inject NavigationManager Nav
+
+<PageTitle>Map generator · Rust Sandbox</PageTitle>
+
+<div class="page">
+    <div class="page-head">
+        <div class="grow">
+            <h1>Map generator</h1>
+            <p>Roll random seeds, compare them side by side and send the one you like to a server. Previews are drawn here from the seed — they show the feel of a map, not Facepunch's exact terrain, so check the final pick on RustMaps.</p>
+        </div>
+    </div>
+
+    <div class="grid g-side" style="grid-template-columns:minmax(0,1fr) minmax(300px,400px)">
+        <div class="stack">
+            <section class="panel">
+                <div class="panel-body">
+                    <div class="row" style="align-items:flex-end">
+                        <label class="field" style="width:200px">
+                            <span>Seed</span>
+                            <input class="input" type="number" min="0" max="2147483647" @bind="_seed" @bind:after="RenderMainAsync" />
+                        </label>
+                        <label class="field" style="flex:1;min-width:220px">
+                            <span>Size: <b>@_size</b> · <span class="muted">@SeedLibrary.SizeAdvice(_size)</span></span>
+                            <input type="range" min="1000" max="6000" step="50" @bind="_size" @bind:event="oninput" @bind:after="SizeChanged" />
+                        </label>
+                        <button class="btn primary" @onclick="RollOneAsync"><Icon Name="dice" /> Random seed</button>
+                        <button class="btn" @onclick="RollManyAsync">Roll 6 to compare</button>
+                    </div>
+                </div>
+            </section>
+
+            @if (_candidates.Count > 0)
+            {
+                <div class="seed-grid">
+                    @for (var i = 0; i < _candidates.Count; i++)
+                    {
+                        var seed = _candidates[i];
+                        var idx = i;
+                        <button class="seed-card @(seed == _seed ? "on" : "")" @onclick="() => PickAsync(seed)">
+                            <canvas @ref="_thumbs[idx]" width="220" height="220"></canvas>
+                            <div class="meta"><b>@seed</b><span class="muted">@_size</span></div>
+                        </button>
+                    }
+                </div>
+            }
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Seed @_seed · size @_size</h2>
+                    <span class="spacer"></span>
+                    <button class="btn sm ghost" @onclick="DownloadAsync"><Icon Name="download" /> PNG</button>
+                    <a class="btn sm" href="@SeedLibrary.RustMapsUrl(_seed, _size)" target="_blank" rel="noopener"><Icon Name="external" /> RustMaps</a>
+                </div>
+                <div class="panel-body">
+                    <div class="map-wrap" style="max-height:none">
+                        <canvas @ref="_main" width="900" height="900"></canvas>
+                    </div>
+                    @if (_result is not null)
+                    {
+                        <div class="row" style="margin-top:12px;gap:18px">
+                            <span><b class="num" style="font-size:18px">@_result.LandPct%</b> <span class="muted">land</span></span>
+                            <span><b class="num" style="font-size:18px">@_result.Monuments.Count</b> <span class="muted">monuments placed</span></span>
+                            <span class="legend">
+                                <span><i style="background:#dd6a3f"></i>Monument</span>
+                                <span><i style="background:#55a892"></i>Safe zone</span>
+                                <span><i style="background:#6b9bd1"></i>Oil rig</span>
+                            </span>
+                        </div>
+                    }
+                </div>
+            </section>
+        </div>
+
+        <div class="stack">
+            <section class="panel">
+                <div class="panel-head"><h2>Use this map</h2></div>
+                <div class="panel-body stack" style="gap:12px">
+                    <label class="field">
+                        <span>Server</span>
+                        <select @bind="_targetServer">
+                            <option value="0">Choose a server…</option>
+                            @foreach (var s in _servers)
+                            {
+                                <option value="@s.Id">@s.Name (now @s.Settings.WorldSize · @s.Settings.Seed)</option>
+                            }
+                        </select>
+                    </label>
+                    <button class="btn primary" @onclick="ApplyAsync" disabled="@(_targetServer == 0)">Set seed @_seed and size @_size</button>
+                    <small class="help">Saved to the server's settings. It takes effect at the next map wipe — or wipe now from the server's Danger zone.</small>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head"><h2>Saved seeds</h2></div>
+                <div class="panel-body stack" style="gap:10px">
+                    <div class="row" style="flex-wrap:nowrap">
+                        <input class="input" placeholder="Name, e.g. Big river + snow north" @bind="_saveName" />
+                        <button class="btn" @onclick="SaveAsync"><Icon Name="star" /> Save</button>
+                    </div>
+                    @if (_library.Count == 0)
+                    {
+                        <p class="muted" style="margin:0">Seeds you save show up here.</p>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <tbody>
+                                @foreach (var s in _library)
+                                {
+                                    <tr class="clickable" @onclick="() => LoadSaved(s)" style="@(s.Seed == _seed && s.WorldSize == _size ? "background:var(--steel-750)" : "")">
+                                        <td>
+                                            <b>@(string.IsNullOrWhiteSpace(s.Name) ? $"Seed {s.Seed}" : s.Name)</b>
+                                            <div class="muted" style="font-size:12.5px">@s.WorldSize · @s.Seed</div>
+                                        </td>
+                                        <td class="r nowrap" @onclick:stopPropagation="true">
+                                            <button class="btn sm ghost icon" title="@(s.IsFavorite ? "Unfavourite" : "Favourite")" @onclick="() => ToggleFavAsync(s)" style="@(s.IsFavorite ? "color:var(--hazard)" : "")"><Icon Name="star" /></button>
+                                            <button class="btn sm ghost icon" title="Delete" @onclick="() => DeleteAsync(s)"><Icon Name="trash" /></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            @if (_result is { Monuments.Count: > 0 })
+            {
+                <section class="panel">
+                    <div class="panel-head"><h2>Monuments in the preview</h2></div>
+                    <div class="panel-body">
+                        <ul style="margin:0;padding-left:18px;columns:2;font-size:13.5px">
+                            @foreach (var m in _result.Monuments.OrderBy(m => m.Name))
+                            {
+                                <li>@m.Name <span class="muted">@Fmt.Grid((float)(m.U * _size - _size / 2.0), (float)(_size / 2.0 - m.V * _size), _size)</span></li>
+                            }
+                        </ul>
+                    </div>
+                </section>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "seed")] public int? SeedQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "size")] public int? SizeQuery { get; set; }
+
+    public sealed class MonumentInfo { public string Name { get; set; } = ""; public double U { get; set; } public double V { get; set; } }
+    public sealed class RenderResult { public List<MonumentInfo> Monuments { get; set; } = new(); public int LandPct { get; set; } }
+
+    private int _seed = SeedLibrary.RandomSeed();
+    private int _size = 4000;
+    private ElementReference _main;
+    private readonly ElementReference[] _thumbs = new ElementReference[6];
+    private List<int> _candidates = new();
+    private bool _thumbsDirty, _mainDirty = true;
+    private RenderResult? _result;
+    private List<ServerInstance> _servers = new();
+    private List<SavedSeed> _library = new();
+    private int _targetServer;
+    private string _saveName = "";
+    private CancellationTokenSource? _sizeDebounce;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ctx.Set(null);
+        if (SeedQuery is > 0) _seed = SeedQuery.Value;
+        if (SizeQuery is >= 1000 and <= 6000) _size = SizeQuery.Value;
+        _servers = await Servers.GetAllAsync();
+        _library = await Library.GetAllAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (_mainDirty)
+            {
+                _mainDirty = false;
+                _result = await JS.InvokeAsync<RenderResult>("RSM.mapgen.render", _main, _seed, _size, new { labels = true, resolution = 900 });
+                StateHasChanged();
+            }
+            if (_thumbsDirty)
+            {
+                _thumbsDirty = false;
+                for (var i = 0; i < _candidates.Count; i++)
+                    await JS.InvokeAsync<object>("RSM.mapgen.render", _thumbs[i], _candidates[i], _size, new { labels = false, resolution = 220, rivers = true });
+            }
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    private Task RenderMainAsync()
+    {
+        _seed = Math.Clamp(_seed, 0, int.MaxValue);
+        _mainDirty = true;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task SizeChanged()
+    {
+        // Redraw once the slider settles.
+        _sizeDebounce?.Cancel();
+        _sizeDebounce = new CancellationTokenSource();
+        var token = _sizeDebounce.Token;
+        try { await Task.Delay(250, token); } catch (TaskCanceledException) { return; }
+        _mainDirty = true;
+        _thumbsDirty = _candidates.Count > 0;
+    }
+
+    private Task RollOneAsync()
+    {
+        _seed = SeedLibrary.RandomSeed();
+        return RenderMainAsync();
+    }
+
+    private Task RollManyAsync()
+    {
+        _candidates = Enumerable.Range(0, 6).Select(_ => SeedLibrary.RandomSeed()).ToList();
+        _thumbsDirty = true;
+        _seed = _candidates[0];
+        return RenderMainAsync();
+    }
+
+    private Task PickAsync(int seed)
+    {
+        _seed = seed;
+        return RenderMainAsync();
+    }
+
+    private void LoadSaved(SavedSeed s)
+    {
+        _seed = s.Seed;
+        _size = s.WorldSize;
+        _mainDirty = true;
+        _thumbsDirty = _candidates.Count > 0;
+    }
+
+    private async Task DownloadAsync()
+    {
+        try { await JS.InvokeVoidAsync("RSM.mapgen.download", _main, $"rust-map-{_size}-{_seed}.png"); }
+        catch (JSException) { Toasts.Error("Couldn't export the image."); }
+    }
+
+    private async Task ApplyAsync()
+    {
+        var server = _servers.FirstOrDefault(s => s.Id == _targetServer);
+        if (server is null) return;
+        await Servers.ApplySeedAsync(server.Id, _seed, _size);
+        _servers = await Servers.GetAllAsync();
+        Toasts.Success($"{server.Name} will use seed {_seed} at size {_size} after its next map wipe.");
+    }
+
+    private async Task SaveAsync()
+    {
+        await Library.SaveAsync(new SavedSeed { Seed = _seed, WorldSize = _size, Name = _saveName.Trim() });
+        _saveName = "";
+        _library = await Library.GetAllAsync();
+        Toasts.Success("Seed saved.");
+    }
+
+    private async Task ToggleFavAsync(SavedSeed s)
+    {
+        s.IsFavorite = !s.IsFavorite;
+        await Library.SaveAsync(s);
+        _library = await Library.GetAllAsync();
+    }
+
+    private async Task DeleteAsync(SavedSeed s)
+    {
+        await Library.DeleteAsync(s.Id);
+        _library = await Library.GetAllAsync();
+    }
+
+    public void Dispose() => _sizeDebounce?.Cancel();
+}

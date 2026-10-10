@@ -1,0 +1,191 @@
+@page "/preferences"
+@inject ServerService Servers
+@inject ServerContext Ctx
+@inject ToastService Toasts
+@inject IConfiguration Config
+@inject IJSRuntime JS
+
+<PageTitle>Preferences · Rust Sandbox</PageTitle>
+
+<div class="page" style="max-width:820px">
+    <div class="page-head">
+        <div class="grow">
+            <h1>Preferences</h1>
+            <p>Settings for the manager itself. Per-server options live in each server's settings.</p>
+        </div>
+    </div>
+
+    <section class="panel" style="margin-bottom:var(--gap)">
+        <div class="panel-head"><h2>Appearance</h2><span class="spacer"></span><span class="hint">saved in this browser</span></div>
+        <div class="panel-body stack" style="gap:14px">
+            <div class="field">
+                <span>Theme</span>
+                <div class="seg">
+                    <button class="@(_theme == "classic" ? "on" : "")" @onclick='() => SetThemeAsync("classic", _glow)'>Classic</button>
+                    <button class="@(_theme == "molten" ? "on" : "")" @onclick='() => SetThemeAsync("molten", _glow)'>Molten Rust</button>
+                    <button class="@(_theme == "ingame" ? "on" : "")" @onclick='() => SetThemeAsync("ingame", _glow)'>Rust in-game</button>
+                    <button class="@(_theme == "toxic" ? "on" : "")" @onclick='() => SetThemeAsync("toxic", _glow)'>Toxic Waste</button>
+                </div>
+                <small>Molten Rust: rusted iron plates bolted down, with lava-hot edges that slowly pulse. Now and then a bolt works itself loose.
+                    Rust in-game: flat see-through panels, green and red buttons and blue highlights, like the game's own menus. No animation.
+                    Toxic Waste: black panels with radioactive green highlights and a hazard stripe under the server header. Only the online light moves.</small>
+            </div>
+            @if (_theme == "molten")
+            {
+                <div class="field">
+                    <span>Glow and moving bolts</span>
+                    <div class="seg">
+                        <button class="@(_glow == "off" ? "on" : "")" @onclick='() => SetThemeAsync(_theme, "off")'>Off</button>
+                        <button class="@(_glow == "subtle" ? "on" : "")" @onclick='() => SetThemeAsync(_theme, "subtle")'>Subtle</button>
+                        <button class="@(_glow == "strong" ? "on" : "")" @onclick='() => SetThemeAsync(_theme, "strong")'>Strong</button>
+                    </div>
+                    <small>Off keeps the plates and bolts but stops the pulse, sparks and spinning bolts. Movement also stops if your system has reduced motion turned on.</small>
+                </div>
+            }
+            @if (_theme != "classic")
+            {
+                <div class="field">
+                    <span>Background picture</span>
+                    <div class="row" style="gap:8px">
+                        <label class="btn sm">
+                            <input type="file" accept="image/*" hidden @ref="_bgInput" @onchange="PickBackgroundAsync" />
+                            @(_hasBackground ? "Change picture…" : "Choose picture…")
+                        </label>
+                        @if (_hasBackground)
+                        {
+                            <button class="btn sm ghost" @onclick="ClearBackgroundAsync">Remove</button>
+                        }
+                    </div>
+                    @if (_bgMessage is not null)
+                    {
+                        <small class="warn">@_bgMessage</small>
+                    }
+                    <small>A screenshot from Rust works great. It's shown darkened and blurred behind the panels, and kept in this browser only.</small>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head"><h2>You in game</h2></div>
+        <div class="panel-body stack" style="gap:10px">
+            <label class="field">
+                <span>Your Steam ID (64-bit)</span>
+                <input class="input" @bind="_steamId" placeholder="7656119…" inputmode="numeric" />
+                <small>Adds a “You, last 24 hours” panel to each dashboard with your K/D, favourite weapon and what keeps killing you. Find it on <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>.</small>
+            </label>
+        </div>
+    </section>
+
+    <section class="panel mt">
+        <div class="panel-head"><h2>Manager address</h2></div>
+        <div class="panel-body stack" style="gap:10px">
+            <label class="field">
+                <span>Address game servers use to reach this manager</span>
+                <input class="input" @bind="_publicUrl" placeholder="http://192.168.1.20:5080" />
+                <small>Written into the telemetry plugin's config. Must be reachable from the game server.</small>
+            </label>
+        </div>
+    </section>
+
+    <div class="row end mt">
+        <button class="btn primary" @onclick="SaveAsync">Save preferences</button>
+    </div>
+
+    <section class="panel mt">
+        <div class="panel-head"><h2>Sign-in &amp; storage</h2></div>
+        <div class="panel-body">
+            <dl class="kv">
+                <dt>Account</dt><dd>@(Config["Auth:Username"] ?? "admin") — change the username and password under <code>Auth</code> in <code>@(AppPaths.SettingsFile ?? "appsettings.json")</code> (or the <code>Auth__Password</code> environment variable) and restart.</dd>
+                @if ((Config["Auth:Password"] ?? "changeme") == "changeme")
+                {
+                    <dt class="warn">Warning</dt><dd class="warn">You're still using the default password. Change it before exposing the manager to the internet.</dd>
+                }
+                <dt>Database</dt><dd><code>@Config.GetConnectionString("Default")</code></dd>
+                <dt>History kept</dt><dd>@Config.GetValue("Manager:RetentionDays", 30) days of positions, longer for kills (Manager:RetentionDays)</dd>
+                <dt>Version</dt><dd>@(typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "1.0.0") · .NET @Environment.Version</dd>
+            </dl>
+        </div>
+    </section>
+</div>
+
+@code {
+    private string _steamId = "";
+    private string _publicUrl = "";
+
+    private string _theme = "ingame", _glow = "strong";
+
+    private bool _hasBackground;
+    private string? _bgMessage;
+    private ElementReference _bgInput;
+
+    private sealed record ThemeChoice(string Theme, string Glow, bool HasBackground);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var t = await JS.InvokeAsync<ThemeChoice>("RSM.theme.get");
+            _theme = t.Theme;
+            _glow = t.Glow;
+            _hasBackground = t.HasBackground;
+            StateHasChanged();
+        }
+        catch (JSException) { }
+    }
+
+    private async Task SetThemeAsync(string theme, string glow)
+    {
+        _theme = theme;
+        _glow = glow;
+        try { await JS.InvokeVoidAsync("RSM.theme.set", theme, glow); }
+        catch (JSException) { }
+    }
+
+    private async Task PickBackgroundAsync()
+    {
+        _bgMessage = null;
+        try
+        {
+            var result = await JS.InvokeAsync<string>("RSM.theme.pickBackground", _bgInput);
+            if (result == "ok") _hasBackground = true;
+            else if (result == "too-big") _bgMessage = "That picture is too big to keep in this browser. Try a smaller one.";
+        }
+        catch (JSException) { _bgMessage = "That file couldn't be read as a picture."; }
+    }
+
+    private async Task ClearBackgroundAsync()
+    {
+        _bgMessage = null;
+        try { await JS.InvokeVoidAsync("RSM.theme.clearBackground"); }
+        catch (JSException) { }
+        _hasBackground = false;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ctx.Set(null);
+        _steamId = await Servers.GetAppSettingAsync("MySteamId") ?? "";
+        _publicUrl = await Servers.GetAppSettingAsync("PublicUrl") ?? Config["Manager:PublicUrl"] ?? "";
+    }
+
+    private async Task SaveAsync()
+    {
+        var id = _steamId.Trim();
+        if (id.Length > 0 && (id.Length != 17 || !id.All(char.IsDigit)))
+        {
+            Toasts.Error("A Steam ID is 17 digits and starts with 7656.");
+            return;
+        }
+        var url = _publicUrl.Trim().TrimEnd('/');
+        if (url.Length > 0 && !Uri.TryCreate(url, UriKind.Absolute, out _))
+        {
+            Toasts.Error("Enter a full address like http://192.168.1.20:5080");
+            return;
+        }
+        await Servers.SetAppSettingAsync("MySteamId", id);
+        if (url.Length > 0) await Servers.SetAppSettingAsync("PublicUrl", url);
+        Toasts.Success("Preferences saved.");
+    }
+}

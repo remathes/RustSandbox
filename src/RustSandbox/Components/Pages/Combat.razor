@@ -1,0 +1,264 @@
+@page "/s/{Id:int}/combat"
+@inherits ServerPageBase
+@inject StatsService Stats
+
+<PageTitle>@(Server?.Name ?? "Server") · Combat stats</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Combat stats</h1>
+                <p>Kills, deaths, distances and weapons reported by the telemetry plugin.</p>
+            </div>
+            <div class="row">
+                <div style="position:relative">
+                    <input class="input" style="width:240px" placeholder="Find a player…" @bind="_find" @bind:event="oninput" @bind:after="FindAsync" />
+                    @if (_matches.Count > 0)
+                    {
+                        <div class="switcher-menu" style="min-width:260px">
+                            @foreach (var m in _matches)
+                            {
+                                <button class="switcher-item" @onclick="() => OpenPlayer(m.SteamId)">
+                                    <span class="ellipsis">@m.Name</span>
+                                    <small>@m.Kills K · @m.Deaths D</small>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+                <RangePicker Value="@_range" ValueChanged="SetRangeAsync" />
+            </div>
+        </div>
+
+        @if (Player is not null)
+        {
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-body">
+                    <PlayerStatsPanel @key="Player" ServerId="Id" SteamId="@Player" FromUtc="From" WorldSize="Server.Settings.WorldSize" OnClose="ClosePlayer" />
+                </div>
+            </section>
+        }
+
+        @if (_stats is null)
+        {
+            <div class="empty">Crunching numbers…</div>
+        }
+        else if (_stats.PvpKills + _stats.PlayerDeaths + _stats.NpcKills + _stats.AnimalKills == 0)
+        {
+            <div class="panel">
+                <div class="empty">
+                    <h3>No combat recorded for this period</h3>
+                    <p>Stats come from the telemetry plugin. Install it on the server and kills start showing up within seconds.</p>
+                    <a class="btn primary" href="s/@Id/telemetry">Set up telemetry</a>
+                </div>
+            </div>
+        }
+        else
+        {
+            var s = _stats;
+            <div class="gauges">
+                <div class="gauge"><div class="val">@s.PvpKills.ToString("N0")</div><div class="lbl">PvP kills</div><div class="foot">@s.UniquePlayers players involved</div></div>
+                <div class="gauge"><div class="val">@s.PlayerDeaths.ToString("N0")</div><div class="lbl">player deaths</div><div class="foot">@s.Suicides suicides</div></div>
+                <div class="gauge"><div class="val">@s.HeadshotRate.ToString("P0")</div><div class="lbl">headshot kills</div><div class="foot">@s.Headshots of @s.PvpKills</div></div>
+                <div class="gauge"><div class="val">@s.AvgPvpDistance.ToString("0")<small>m</small></div><div class="lbl">average kill distance</div></div>
+                <div class="gauge">
+                    <div class="val">@(s.LongestKill?.Distance.ToString("0") ?? "0")<small>m</small></div>
+                    <div class="lbl">longest kill</div>
+                    @if (s.LongestKill is { } lk)
+                    {
+                        <div class="foot ellipsis" title="@lk.KillerName → @lk.VictimName, @lk.Weapon">@lk.KillerName · @lk.Weapon</div>
+                    }
+                </div>
+                <div class="gauge"><div class="val">@s.NpcKills.ToString("N0")</div><div class="lbl">scientists killed</div><div class="foot">@s.AnimalKills animals · @(s.HeliKills + s.BradleyKills) heli/bradley</div></div>
+            </div>
+
+            <div class="grid g-main mt">
+                <section class="panel">
+                    <div class="panel-head"><h2>Leaderboard</h2><span class="spacer"></span><span class="hint">click a player for details</span></div>
+                    <div class="panel-body flush table-wrap">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th></th>
+                                    <th>Player</th>
+                                    <th class="sortable r" @onclick='() => Sort("kills")'>Kills @Arrow("kills")</th>
+                                    <th class="sortable r" @onclick='() => Sort("deaths")'>Deaths @Arrow("deaths")</th>
+                                    <th class="sortable r" @onclick='() => Sort("kd")'>K/D @Arrow("kd")</th>
+                                    <th class="sortable r" @onclick='() => Sort("hs")'>HS % @Arrow("hs")</th>
+                                    <th class="sortable r" @onclick='() => Sort("longest")'>Longest @Arrow("longest")</th>
+                                    <th class="sortable r" @onclick='() => Sort("pve")'>PvE @Arrow("pve")</th>
+                                    <th>Favourite weapon</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var rank = 0; }
+                                @foreach (var r in Leaderboard().Take(_showAll ? 500 : 15))
+                                {
+                                    rank++;
+                                    <tr class="clickable" @onclick="() => OpenPlayer(r.SteamId)">
+                                        <td class="rank">@rank</td>
+                                        <td class="ellipsis" style="max-width:180px"><b>@r.Name</b></td>
+                                        <td class="r num">@r.Kills</td>
+                                        <td class="r num">@r.Deaths</td>
+                                        <td class="r num @(r.KD >= 2 ? "good" : "")">@r.KD.ToString("0.00")</td>
+                                        <td class="r num">@r.HeadshotRate.ToString("P0")</td>
+                                        <td class="r num">@r.Longest.ToString("0") m</td>
+                                        <td class="r num">@(r.NpcKills + r.AnimalKills)</td>
+                                        <td class="ellipsis dim" style="max-width:160px">@r.FavWeapon</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (s.Leaderboard.Count > 15)
+                        {
+                            <div style="padding:10px 16px"><button class="btn sm ghost" @onclick="() => _showAll = !_showAll">@(_showAll ? "Show top 15" : $"Show all {s.Leaderboard.Count}")</button></div>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Latest deaths</h2></div>
+                    <div class="panel-body flush" style="max-height:620px;overflow-y:auto">
+                        <KillFeed Items="s.Recent" WorldSize="Server.Settings.WorldSize" OnPlayer="OpenPlayer" />
+                    </div>
+                </section>
+            </div>
+
+            <section class="panel mt">
+                <div class="panel-head"><h2>Weapons</h2><span class="spacer"></span><span class="hint">kills by players, all victims</span></div>
+                <div class="panel-body flush table-wrap">
+                    <table class="table">
+                        <thead><tr><th>Weapon</th><th class="r">Kills</th><th class="r">Headshots</th><th class="r">Avg distance</th><th class="r">Longest</th><th class="r">Shots fired</th><th class="r">Accuracy</th><th style="width:28%"></th></tr></thead>
+                        <tbody>
+                            @{ var maxKills = Math.Max(1, s.Weapons.Select(w => w.Kills).DefaultIfEmpty(1).Max()); }
+                            @foreach (var w in s.Weapons.Take(20))
+                            {
+                                <tr>
+                                    <td><b>@w.Weapon</b></td>
+                                    <td class="r num">@w.Kills</td>
+                                    <td class="r num">@w.Headshots</td>
+                                    <td class="r num">@w.AvgDistance.ToString("0") m</td>
+                                    <td class="r num">@w.MaxDistance.ToString("0") m</td>
+                                    <td class="r num">@(w.Shots > 0 ? w.Shots.ToString("N0") : "—")</td>
+                                    <td class="r num">@(w.Shots > 0 ? w.Accuracy.ToString("P0") : "—")</td>
+                                    <td><div class="bar-track"><div class="bar-fill" style="width:@((w.Kills * 100.0 / maxKills).ToString("0", CultureInfo.InvariantCulture))%"></div></div></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <div class="grid g-3 mt">
+                <section class="panel">
+                    <div class="panel-head"><h3>Kill distance (PvP)</h3></div>
+                    <div class="panel-body"><ColumnChart Items="s.DistanceBuckets" Height="140" /></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>PvP kills by hour of day</h3></div>
+                    <div class="panel-body">
+                        <ColumnChart Items="@(s.KillsByHour.Select((v, h) => new NamedValue(h.ToString("00"), v)).ToList())" Height="140" LabelEvery="3" Highlight="@(DateTime.Now.Hour.ToString("00"))" />
+                    </div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>Most used weapons</h3><span class="spacer"></span><span class="hint">shots fired</span></div>
+                    <div class="panel-body"><BarList Items="s.MostUsedWeapons" Take="8" Color="var(--sky)" ShowDetail="true" Empty="Shot counts appear once the plugin reports weapon usage." /></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>What killed players</h3></div>
+                    <div class="panel-body"><BarList Items="s.DeathCauses" Take="10" Color="var(--signal)" /></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>What players killed</h3></div>
+                    <div class="panel-body"><BarList Items="s.VictimBreakdown" Take="10" Color="var(--hazard)" /></div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h3>Where PvP shots landed</h3></div>
+                    <div class="panel-body"><BarList Items="s.BodyParts" Take="8" Color="var(--patina)" /></div>
+                </section>
+            </div>
+
+            <section class="panel mt">
+                <div class="panel-head"><h2>Activity</h2><span class="spacer"></span><span class="hint">PvP kills per @(s.Timeline.Count > 0 && s.Timeline[0].Name.Contains(':') ? "hour" : "day")</span></div>
+                <div class="panel-body">
+                    <ColumnChart Items="s.Timeline" Height="150" LabelEvery="@Math.Max(1, s.Timeline.Count / 10)" />
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "player")] public string? Player { get; set; }
+
+    private string _range = "7d";
+    private CombatStats? _stats;
+    private string _sort = "kills";
+    private bool _desc = true, _showAll;
+    private string _find = "";
+    private List<PlayerSearchResult> _matches = new();
+    private DateTime _loaded;
+
+    private DateTime? From => StatRanges.From(_range, Server?.LastWipeUtc);
+
+    protected override async Task OnServerChangedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _stats = await Stats.GetServerStatsAsync(Id, From);
+        _loaded = DateTime.UtcNow;
+    }
+
+    private async Task SetRangeAsync(string range)
+    {
+        _range = range;
+        _stats = null;
+        await LoadAsync();
+    }
+
+    protected override async Task OnLiveRefreshAsync()
+    {
+        // Stats are heavier to compute; refresh at most twice a minute.
+        if (DateTime.UtcNow - _loaded > TimeSpan.FromSeconds(30)) await LoadAsync();
+        StateHasChanged();
+    }
+
+    private IEnumerable<PlayerRow> Leaderboard()
+    {
+        var rows = _stats?.Leaderboard ?? new();
+        Func<PlayerRow, double> key = _sort switch
+        {
+            "deaths" => r => r.Deaths,
+            "kd" => r => r.KD,
+            "hs" => r => r.HeadshotRate,
+            "longest" => r => r.Longest,
+            "pve" => r => r.NpcKills + r.AnimalKills,
+            _ => r => r.Kills,
+        };
+        return _desc ? rows.OrderByDescending(key).ThenByDescending(r => r.Kills) : rows.OrderBy(key).ThenByDescending(r => r.Kills);
+    }
+
+    private void Sort(string key)
+    {
+        if (_sort == key) _desc = !_desc;
+        else { _sort = key; _desc = true; }
+    }
+
+    private string Arrow(string key) => _sort != key ? "" : _desc ? "↓" : "↑";
+
+    private async Task FindAsync()
+    {
+        _matches = _find.Trim().Length < 2 ? new() : await Stats.SearchPlayersAsync(Id, _find.Trim(), 8);
+    }
+
+    private void OpenPlayer(string steamId)
+    {
+        _find = "";
+        _matches.Clear();
+        Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", steamId));
+    }
+
+    private void ClosePlayer() => Nav.NavigateTo(Nav.GetUriWithQueryParameter("player", (string?)null));
+}

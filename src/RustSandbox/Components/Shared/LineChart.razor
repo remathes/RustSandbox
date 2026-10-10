@@ -1,0 +1,72 @@
+@* Multi-series line chart with a y-axis, used for server performance history *@
+@{
+    const int W = 640, H = 200, padL = 36, padR = 8, padT = 10, padB = 22;
+    var series = Series.Where(s => s.Values.Count > 0).ToList();
+}
+@if (series.Count == 0 || series.All(s => s.Values.Count < 2))
+{
+    <div class="empty" style="padding:40px 10px">@Empty</div>
+}
+else
+{
+    var max = YMax ?? series.Max(s => s.Values.Max());
+    if (max <= 0) { max = 1; }
+    max = NiceCeil(max);
+    var n = series.Max(s => s.Values.Count);
+    var plotW = W - padL - padR;
+    var plotH = H - padT - padB;
+    string X(int i) => (padL + (n <= 1 ? 0 : (double)i / (n - 1) * plotW)).ToString("0.#", CultureInfo.InvariantCulture);
+    string Y(double v) => (padT + plotH - Math.Clamp(v / max, 0, 1) * plotH).ToString("0.#", CultureInfo.InvariantCulture);
+
+    <svg class="chart-svg" viewBox="0 0 @W @H" role="img" aria-label="@AriaLabel">
+        @for (var g = 0; g <= 4; g++)
+        {
+            var v = max * g / 4;
+            var y = Y(v);
+            <g>
+                <line class="grid-line" x1="@padL" x2="@(W - padR)" y1="@y" y2="@y" />
+                <text x="@(padL - 6)" y="@y" text-anchor="end" dominant-baseline="middle">@v.ToString("0.#")</text>
+            </g>
+        }
+        @if (XLabels.Count == n && n > 1)
+        {
+            foreach (var i in new[] { 0, n / 2, n - 1 })
+            {
+                <g><text x="@X(i)" y="@(H - 6)" text-anchor="@(i == 0 ? "start" : i == n - 1 ? "end" : "middle")">@XLabels[i]</text></g>
+            }
+        }
+        @foreach (var s in series)
+        {
+            var offset = n - s.Values.Count;
+            var pts = string.Join(" ", s.Values.Select((v, i) => $"{X(i + offset)},{Y(v)}"));
+            <polyline points="@pts" fill="none" stroke="@s.Color" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+        }
+    </svg>
+    @if (series.Count > 1)
+    {
+        <div class="legend" style="margin-top:6px">
+            @foreach (var s in series)
+            {
+                <span><i style="background:@s.Color"></i>@s.Name</span>
+            }
+        </div>
+    }
+}
+
+@code {
+    public sealed record ChartSeries(string Name, string Color, IReadOnlyList<double> Values);
+
+    [Parameter] public IReadOnlyList<ChartSeries> Series { get; set; } = Array.Empty<ChartSeries>();
+    [Parameter] public IReadOnlyList<string> XLabels { get; set; } = Array.Empty<string>();
+    [Parameter] public double? YMax { get; set; }
+    [Parameter] public string AriaLabel { get; set; } = "Chart";
+    [Parameter] public string Empty { get; set; } = "Collecting data — check back in a minute.";
+
+    private static double NiceCeil(double v)
+    {
+        var mag = Math.Pow(10, Math.Floor(Math.Log10(v)));
+        foreach (var m in new[] { 1, 2, 2.5, 5, 10 })
+            if (m * mag >= v) return m * mag;
+        return 10 * mag;
+    }
+}

@@ -1,0 +1,15 @@
+@* Time-window selector used on stats pages *@
+<div class="seg" role="group" aria-label="Time range">
+    @foreach (var (key, label) in Options ?? StatRanges.All)
+    {
+        <button class="@(Value == key ? "on" : "")" aria-pressed="@(Value == key ? "true" : "false")" @onclick="() => Select(key)">@label</button>
+    }
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "7d";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public (string Key, string Label)[]? Options { get; set; }
+
+    private Task Select(string key) => ValueChanged.InvokeAsync(key);
+}

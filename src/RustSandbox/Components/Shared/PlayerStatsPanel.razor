@@ -1,0 +1,181 @@
+@inject StatsService Stats
+
+@if (_stats is null)
+{
+    <div class="empty">Loading player…</div>
+}
+else
+{
+    var s = _stats;
+    <div class="stack">
+        <div class="player-head">
+            <div class="avatar" style="background:@AvatarColor(s.SteamId)">@Initials(s.Name)</div>
+            <div style="min-width:0;flex:1">
+                <h2 class="ellipsis">@s.Name</h2>
+                <div class="muted" style="font-size:13px">
+                    <a href="@Fmt.SteamProfile(s.SteamId)" target="_blank" rel="noopener">@s.SteamId</a>
+                    @if (s.LastSeen is { } seen)
+                    {
+                        <span> · last seen @Fmt.Ago(seen)</span>
+                    }
+                    @if (s.Sessions > 0)
+                    {
+                        <span> · @(s.Sessions == 1 ? "1 session" : $"{s.Sessions} sessions")</span>
+                    }
+                </div>
+            </div>
+            @if (OnClose.HasDelegate)
+            {
+                <button class="btn ghost icon" @onclick="OnClose" aria-label="Close">✕</button>
+            }
+        </div>
+
+        <div class="gauges">
+            <div class="gauge"><div class="val">@s.Kills</div><div class="lbl">player kills</div></div>
+            <div class="gauge"><div class="val">@s.Deaths</div><div class="lbl">deaths</div></div>
+            <div class="gauge"><div class="val @(s.KD >= 1 ? "good" : "")">@s.KD.ToString("0.00")</div><div class="lbl">K/D</div></div>
+            <div class="gauge"><div class="val">@s.HeadshotRate.ToString("P0")</div><div class="lbl">headshots</div></div>
+        </div>
+
+        <div class="duel">
+            <div>
+                <span>Favourite weapon (most kills)</span>
+                <b>@(string.IsNullOrEmpty(s.FavWeapon) ? "—" : s.FavWeapon)</b>
+            </div>
+            <div>
+                <span>Most used weapon (shots fired)</span>
+                <b>@(string.IsNullOrEmpty(s.MostUsedWeapon) ? "—" : s.MostUsedWeapon)</b>
+                @if (s.ShotsFired > 0)
+                {
+                    <span>@s.ShotsFired.ToString("N0") shots · @s.Accuracy.ToString("P0") hit</span>
+                }
+            </div>
+            <div>
+                <span>Average / longest kill</span>
+                <b>@s.AvgDistance.ToString("0") m / @(s.LongestKill?.Distance.ToString("0") ?? "0") m</b>
+                @if (s.LongestKill is { } lk)
+                {
+                    <span>@lk.Weapon on @lk.VictimName</span>
+                }
+            </div>
+            <div>
+                <span>PvE</span>
+                <b>@s.NpcKills scientists · @s.AnimalKills animals</b>
+            </div>
+            <div>
+                <span>Gathered</span>
+                <b>@(s.Gathered > 0 ? s.Gathered.ToString("N0") : "Nothing yet")</b>
+                @if (!string.IsNullOrEmpty(s.FavouriteResource))
+                {
+                    <span>mostly @s.FavouriteResource</span>
+                }
+            </div>
+            <div>
+                <span>Nemesis — killed them most</span>
+                <b>@(s.Nemesis is null ? "Nobody yet" : $"{s.Nemesis.Name} ×{s.Nemesis.Value:0}")</b>
+            </div>
+            <div>
+                <span>Favourite target</span>
+                <b>@(s.FavouriteVictim is null ? "Nobody yet" : $"{s.FavouriteVictim.Name} ×{s.FavouriteVictim.Value:0}")</b>
+            </div>
+        </div>
+
+        <div class="grid g-2">
+            <div>
+                <h3 style="margin-bottom:10px">What they killed</h3>
+                <BarList Items="s.KilledWhat" Empty="Hasn't killed anything yet." />
+            </div>
+            <div>
+                <h3 style="margin-bottom:10px">What killed them</h3>
+                <BarList Items="s.KilledBy" Color="var(--signal)" Empty="Hasn't died — impressive." />
+            </div>
+        </div>
+
+        @if (s.Gathered > 0)
+        {
+            <div class="grid g-2">
+                <div>
+                    <h3 style="margin-bottom:10px">What they gathered</h3>
+                    <BarList Items="s.GatheredByType" Color="var(--patina)" />
+                </div>
+                <div>
+                    <h3 style="margin-bottom:10px">Most gathered items</h3>
+                    <BarList Items="s.GatheredItems" Color="var(--hazard)" ShowDetail="true" />
+                </div>
+            </div>
+        }
+
+        <div>
+            <h3 style="margin-bottom:10px">Kill distance</h3>
+            <ColumnChart Items="s.DistanceBuckets" Height="90" Empty="No player kills yet." />
+        </div>
+
+        @if (s.Weapons.Count > 0)
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead><tr><th>Weapon</th><th class="r">Kills</th><th class="r">Headshots</th><th class="r">Avg</th><th class="r">Longest</th><th class="r">Shots</th><th class="r">Accuracy</th></tr></thead>
+                    <tbody>
+                        @foreach (var w in s.Weapons.Take(12))
+                        {
+                            <tr>
+                                <td>@w.Weapon</td>
+                                <td class="r num">@w.Kills</td>
+                                <td class="r num">@w.Headshots</td>
+                                <td class="r num">@w.AvgDistance.ToString("0") m</td>
+                                <td class="r num">@w.MaxDistance.ToString("0") m</td>
+                                <td class="r num">@w.Shots.ToString("N0")</td>
+                                <td class="r num">@(w.Shots > 0 ? w.Accuracy.ToString("P0") : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <div>
+            <h3 style="margin-bottom:6px">Recent fights</h3>
+            <div class="panel inset"><KillFeed Items="s.Recent" WorldSize="WorldSize" /></div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ServerId { get; set; }
+    [Parameter, EditorRequired] public string SteamId { get; set; } = "";
+    [Parameter] public DateTime? FromUtc { get; set; }
+    [Parameter] public int WorldSize { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private PlayerStats? _stats;
+    private (int, string, DateTime?) _loadedKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = (ServerId, SteamId, FromUtc);
+        if (key == _loadedKey && _stats is not null) return;
+        _loadedKey = key;
+        _stats = null;
+        _stats = await Stats.GetPlayerStatsAsync(ServerId, SteamId, FromUtc);
+    }
+
+    public async Task RefreshAsync()
+    {
+        _stats = await Stats.GetPlayerStatsAsync(ServerId, SteamId, FromUtc);
+        StateHasChanged();
+    }
+
+    public static string Initials(string name)
+    {
+        var letters = new string(name.Where(char.IsLetterOrDigit).Take(2).ToArray());
+        return letters.Length == 0 ? "?" : letters.ToUpperInvariant();
+    }
+
+    public static string AvatarColor(string id)
+    {
+        string[] palette = { "#8e3b1f", "#3d6d62", "#5b4a7a", "#7a5b2e", "#2f5878", "#6e3b4f", "#4f6a2e" };
+        var h = 0;
+        foreach (var c in id) h = (h * 31 + c) & 0x7fffffff;
+        return palette[h % palette.Length];
+    }
+}

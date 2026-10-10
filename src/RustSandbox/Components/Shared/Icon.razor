@@ -1,0 +1,107 @@
+@* Minimal stroke icon set (24px grid, 1.8 stroke) *@
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="@Class">
+    @switch (Name)
+    {
+        case "fleet":
+            <g><rect x="3" y="3" width="7.5" height="7.5" rx="1.2" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.2" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.2" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.2" /></g>
+            break;
+        case "dashboard":
+            <g><path d="M4 19h16" /><path d="M6 16v-5" /><path d="M10 16V7" /><path d="M14 16v-7" /><path d="M18 16V5" /></g>
+            break;
+        case "console":
+            <g><rect x="3" y="4" width="18" height="16" rx="2" /><path d="m7 9 3 3-3 3" /><path d="M12.5 15H17" /></g>
+            break;
+        case "players":
+            <g><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" /><path d="M15.5 5.2a3 3 0 0 1 0 5.6" /><path d="M17 14.3c2 .5 3.2 2.2 3.6 4.7" /></g>
+            break;
+        case "map":
+            <g><path d="m3 6 6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z" /><path d="M9 4v14" /><path d="M15 6v14" /></g>
+            break;
+        case "combat":
+            <g><circle cx="12" cy="12" r="7.5" /><circle cx="12" cy="12" r="2.2" /><path d="M12 2v4" /><path d="M12 18v4" /><path d="M2 12h4" /><path d="M18 12h4" /></g>
+            break;
+        case "gather":
+            <g><path d="M13.5 3.5c3.6.4 6.6 3.4 7 7l-5-1.2-2.6 2.6-3.3-3.3 2.6-2.6-1.2-5" /><path d="m10.2 11.9-6.7 6.7a1.4 1.4 0 0 0 2 2l6.7-6.7" /></g>
+            break;
+        case "schedule":
+            <g><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></g>
+            break;
+        case "settings":
+            <g><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></g>
+            break;
+        case "sliders":
+            <g><path d="M4 6h9" /><path d="M17 6h3" /><circle cx="15" cy="6" r="2" /><path d="M4 12h3" /><path d="M11 12h9" /><circle cx="9" cy="12" r="2" /><path d="M4 18h11" /><path d="M19 18h1" /><circle cx="17" cy="18" r="2" /></g>
+            break;
+        case "plugin":
+            <g><path d="M9 3h6v3a2 2 0 1 0 4 0V9h-3a2 2 0 1 0 0 4h3v8H5v-8h3a2 2 0 1 0 0-4H5V3h4Z" /></g>
+            break;
+        case "seed":
+            <g><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17" /><path d="M12 3.5c2.4 2.4 3.4 5.3 3.4 8.5s-1 6.1-3.4 8.5c-2.4-2.4-3.4-5.3-3.4-8.5s1-6.1 3.4-8.5Z" /></g>
+            break;
+        case "play":
+            <g><path d="M7 4.5v15l12-7.5-12-7.5Z" /></g>
+            break;
+        case "stop":
+            <g><rect x="6" y="6" width="12" height="12" rx="1.5" /></g>
+            break;
+        case "restart":
+            <g><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 5v6h-6" /></g>
+            break;
+        case "save":
+            <g><path d="M5 3h11l3 3v15H5V3Z" /><path d="M8 3v5h7V3" /><rect x="8" y="13" width="8" height="5" /></g>
+            break;
+        case "plus":
+            <g><path d="M12 5v14" /><path d="M5 12h14" /></g>
+            break;
+        case "logout":
+            <g><path d="M15 4h4v16h-4" /><path d="m10 16 4-4-4-4" /><path d="M14 12H4" /></g>
+            break;
+        case "search":
+            <g><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.3-4.3" /></g>
+            break;
+        case "user":
+            <g><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6" /></g>
+            break;
+        case "copy":
+            <g><rect x="8.5" y="8.5" width="11.5" height="11.5" rx="1.5" /><path d="M15.5 8.5V5.5A1.5 1.5 0 0 0 14 4H5.5A1.5 1.5 0 0 0 4 5.5V14a1.5 1.5 0 0 0 1.5 1.5h3" /></g>
+            break;
+        case "download":
+            <g><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M4 20h16" /></g>
+            break;
+        case "trash":
+            <g><path d="M4 7h16" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M6 7l1 13h10l1-13" /><path d="M9 7V4h6v3" /></g>
+            break;
+        case "external":
+            <g><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v6H4V6h6" /></g>
+            break;
+        case "menu":
+            <g><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></g>
+            break;
+        case "star":
+            <g><path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3.5Z" /></g>
+            break;
+        case "dice":
+            <g><rect x="3.5" y="3.5" width="17" height="17" rx="3" /><circle cx="8.5" cy="8.5" r="1" fill="currentColor" /><circle cx="15.5" cy="15.5" r="1" fill="currentColor" /><circle cx="15.5" cy="8.5" r="1" fill="currentColor" /><circle cx="8.5" cy="15.5" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /></g>
+            break;
+        case "chat":
+            <g><path d="M4 5h16v11H9l-5 4V5Z" /></g>
+            break;
+        case "wipe":
+            <g><path d="M4 20h16" /><path d="m6 16 9.5-9.5a2.1 2.1 0 0 1 3 3L9 19H6v-3Z" /></g>
+            break;
+        case "quest":
+            <g><path d="M6 3.5h10.5a2 2 0 0 1 2 2V18a2.5 2.5 0 0 1-2.5 2.5H7.5A2.5 2.5 0 0 1 5 18V5a1.5 1.5 0 0 1 1-1.5Z" /><path d="M9 8h6" /><path d="M9 12h6" /><path d="M9 16h3" /></g>
+            break;
+        case "bolt":
+            <g><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z" /></g>
+            break;
+        default:
+            <g><circle cx="12" cy="12" r="8" /></g>
+            break;
+    }
+</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public string? Class { get; set; }
+}

@@ -1,0 +1,432 @@
+@page "/s/{Id:int}/map"
+@inherits ServerPageBase
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject LiveWorldStore World
+@inject HeatmapService Heat
+@inject TelemetryService Telemetry
+
+<PageTitle>@(Server?.Name ?? "Server") · Live map</PageTitle>
+
+@if (Server is not null)
+{
+    var players = World.Players(Id);
+    <div class="page">
+        <div class="grid g-side">
+            <div>
+                <div class="map-wrap" @ref="_mapEl"></div>
+            </div>
+
+            <div class="stack">
+                @if (_selected is not null)
+                {
+                    <section class="panel">
+                        <div class="panel-body">
+                            <PlayerStatsPanel ServerId="Id" SteamId="@_selected" WorldSize="Server.Settings.WorldSize" OnClose="ClearSelection" />
+                        </div>
+                    </section>
+                }
+                else
+                {
+                    <section class="panel">
+                        <div class="panel-head"><h2>Heat map</h2></div>
+                        <div class="panel-body map-controls">
+                            <label class="field">
+                                <span>Show</span>
+                                <select @bind="Layer" @bind:after="LoadHeatAsync">
+                                    <option value="Presence">Where players spend time</option>
+                                    <option value="PvpKills">Where PvP kills happen</option>
+                                    <option value="Deaths">Where players die (any cause)</option>
+                                    <option value="NpcKills">Where scientists are killed</option>
+                                </select>
+                            </label>
+                            <RangePicker Value="@_range" ValueChanged="SetRangeAsync" Options="MapRanges" />
+                            <div>
+                                <div class="ramp"></div>
+                                <div class="row" style="justify-content:space-between;font-size:12px;margin-top:4px"><span class="muted">quiet</span><span class="muted">busy</span></div>
+                            </div>
+                            <div class="muted" style="font-size:13px">@_heatSummary</div>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-head"><h2>Layers</h2></div>
+                        <div class="panel-body stack" style="gap:10px">
+                            <label class="check"><input type="checkbox" checked="@_showHeat" @onchange='e => SetOptionAsync("showHeat", e)' /><span><b>Heat</b></span></label>
+                            <label class="check"><input type="checkbox" checked="@_showKills" @onchange='e => SetOptionAsync("showKills", e)' /><span><b>Recent kills</b><small>Red ✕ PvP, yellow ✕ other deaths. Lines join killer and victim.</small></span></label>
+                            <label class="check"><input type="checkbox" checked="@_showNames" @onchange='e => SetOptionAsync("showNames", e)' /><span><b>Player names</b><small>Shown when zoomed in</small></span></label>
+                            <label class="check"><input type="checkbox" checked="@_showGrid" @onchange='e => SetOptionAsync("showGrid", e)' /><span><b>Map grid</b></span></label>
+                            <label class="check"><input type="checkbox" checked="@_showMonuments" @onchange='e => SetOptionAsync("showMonuments", e)' /><span><b>Monument labels</b></span></label>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-head"><h2>On the map</h2><span class="spacer"></span><span class="hint">@players.Count tracked</span></div>
+                        <div class="panel-body flush" style="max-height:340px;overflow-y:auto">
+                            @if (players.Count == 0)
+                            {
+                                @if (World.LastTelemetryUtc(Id) is { } lastReport && DateTime.UtcNow - lastReport < TimeSpan.FromMinutes(2))
+                                {
+                                    <div class="empty">
+                                        <p>Nobody is in game right now. Players appear here as soon as they join; the heat map shows where people have been.</p>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="empty">
+                                        <p>No reports from the telemetry plugin right now, so live positions aren't available.</p>
+                                        <a class="btn sm" href="s/@Id/telemetry">Check telemetry</a>
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <table class="table">
+                                    <tbody>
+                                        @foreach (var p in players)
+                                        {
+                                            <tr class="clickable" @onclick="() => FocusAsync(p.SteamId)">
+                                                <td class="ellipsis" style="max-width:170px">@p.Name</td>
+                                                <td class="r muted">@Fmt.Grid(p.X, p.Z, Server.Settings.WorldSize)</td>
+                                                <td class="r num @(p.Health < 30 ? "bad" : "")">@p.Health.ToString("0") hp</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                        </div>
+                    </section>
+
+                    var mapImage = MapImages.Resolve(Server);
+                    var manual = MapImages.ManualMargin(Server, mapImage);
+                    var shownMargin = _margin ?? manual ?? _autoMargin;
+                    <section class="panel">
+                        <div class="panel-head"><h2>Map image</h2></div>
+                        <div class="panel-body stack" style="gap:10px">
+                            <p class="muted" style="font-size:12.5px;margin:0">
+                                @if (mapImage is null)
+                                {
+                                    <span>Background is a generated preview for seed @Server.Settings.Seed — positions are exact, terrain is approximate. The real map appears automatically the next time the server starts, or render a high-res one below.</span>
+                                }
+                                else if (mapImage.Rendered)
+                                {
+                                    <span>Showing the high-res map rendered on your server@(_imageWidth > 0 ? $" ({_imageWidth}×{_imageHeight} px)" : "").</span>
+                                }
+                                else
+                                {
+                                    <span>@(Server.Settings.MapImageAuto ? "Showing the map image your server uploaded at startup." : "Showing your map image.")@(_imageWidth > 0 ? $" ({_imageWidth}×{_imageHeight} px)" : "") Render a high-res one for a sharper map.</span>
+                                }
+                            </p>
+                            @if (CanRender)
+                            {
+                                <div class="row">
+                                    <button class="btn sm" disabled="@(_rendering || !Runtime.IsOnline)" @onclick="RenderMapAsync">
+                                        @(_rendering ? "Rendering…" : mapImage?.Rendered == true ? "Re-render high-res map" : "Render high-res map")
+                                    </button>
+                                    @if (!Runtime.IsOnline) { <span class="hint">Server must be running</span> }
+                                </div>
+                                <small class="muted">Runs <code>world.rendermap</code> on the server (about 10–30 s, may cause a short hitch) and uses the saved PNG from now on. Re-render after a wipe to a new seed.</small>
+                            }
+                        </div>
+                    </section>
+
+                    @if (mapImage is not null)
+                    {
+                        <section class="panel">
+                            <div class="panel-head"><h2>Map alignment</h2><span class="spacer"></span><span class="hint">@(_margin is null && manual is null ? "automatic" : "manual")</span></div>
+                            <div class="panel-body stack" style="gap:10px">
+                                <label class="field">
+                                    <span>Ocean border in the image: <b>@shownMargin m</b></span>
+                                    <div class="row" style="gap:6px;flex-wrap:nowrap">
+                                        <button class="btn sm ghost" title="−25 m" @onclick="() => NudgeAsync(-25, shownMargin)">−</button>
+                                        <input type="range" style="flex:1" min="0" max="2000" step="5" value="@shownMargin" @oninput="MarginChanged" />
+                                        <button class="btn sm ghost" title="+25 m" @onclick="() => NudgeAsync(25, shownMargin)">+</button>
+                                    </div>
+                                    <small>Usually right automatically. If dots or grid squares look shifted against the game map, use − / + (25 m each) until monuments line up.</small>
+                                </label>
+                                @if (_margin is not null && _margin != manual)
+                                {
+                                    <div class="row">
+                                        <button class="btn sm primary" @onclick="SaveMarginAsync">Save alignment</button>
+                                        <button class="btn sm ghost" @onclick="ResetMarginAsync">Undo</button>
+                                    </div>
+                                }
+                                else if (manual is not null)
+                                {
+                                    <div class="row"><button class="btn sm ghost" @onclick="UseAutoMarginAsync">Back to automatic</button></div>
+                                }
+                            </div>
+                        </section>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "player")] public string? FocusPlayer { get; set; }
+
+    private static readonly (string, string)[] MapRanges = { ("1h", "1 hour"), ("6h", "6 hours"), ("24h", "24 hours"), ("7d", "7 days"), ("wipe", "This wipe") };
+
+    private ElementReference _mapEl;
+    private int? _mapId;
+    private DotNetObjectReference<LiveMap>? _ref;
+    private HeatLayer Layer { get; set; } = HeatLayer.Presence;
+    private string _range = "24h";
+    private string _heatSummary = "";
+    private string? _selected;
+    private bool _showHeat = true, _showKills = true, _showNames = true, _showGrid = true, _showMonuments = true;
+    private DateTime _heatLoaded;
+    private bool _worldSet;
+    private int? _margin;
+    private int _autoMargin, _imageWidth, _imageHeight;
+    private bool _rendering;
+    private string? _lastImageUrl;
+
+    private bool CanRender => Server is { IsDemo: false } s && s.Settings.ManageProcess && !string.IsNullOrWhiteSpace(s.Settings.InstallDir);
+
+    private async Task MarginChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var m)) return;
+        _margin = m;
+        await SetupWorldAsync();
+    }
+
+    private async Task NudgeAsync(int delta, int current)
+    {
+        _margin = Math.Clamp(current + delta, 0, 3000);
+        await SetupWorldAsync();
+    }
+
+    private async Task SaveMarginAsync()
+    {
+        var server = await Servers.GetAsync(Id);
+        var image = server is null ? null : MapImages.Resolve(server);
+        if (server is null || image is null || _margin is null) return;
+        server.Settings.MapImageMarginMeters = _margin.Value;
+        server.Settings.MapImageMarginSource = image.Key;
+        await Servers.SaveAsync(server);
+        _margin = null;
+        await ReloadServerAsync();
+        Toasts.Success("Map alignment saved.");
+    }
+
+    private async Task UseAutoMarginAsync()
+    {
+        var server = await Servers.GetAsync(Id);
+        if (server is null) return;
+        server.Settings.MapImageMarginSource = "";
+        await Servers.SaveAsync(server);
+        _margin = null;
+        await ReloadServerAsync();
+        await SetupWorldAsync();
+    }
+
+    [JSInvokable]
+    public void OnMapImageLoaded(int width, int height)
+    {
+        _imageWidth = width;
+        _imageHeight = height;
+        if (Server is not null) _autoMargin = MapImages.AutoMargin(width, Server.Settings.WorldSize);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RenderMapAsync()
+    {
+        if (Server is null || _rendering) return;
+        var server = Server;
+        _rendering = true;
+        var before = MapImages.FindRendered(server, fresh: true)?.LastWriteTimeUtc;
+        try
+        {
+            await Connections.ExecuteAsync(Id, "world.rendermap");
+            // The PNG is written into the server folder once rendering finishes.
+            for (var i = 0; i < 45; i++)
+            {
+                await Task.Delay(2000);
+                var f = MapImages.FindRendered(server, fresh: true);
+                if (f is not null && f.LastWriteTimeUtc != before && DateTime.UtcNow - f.LastWriteTimeUtc > TimeSpan.FromSeconds(2))
+                {
+                    Toasts.Success("High-res map ready.");
+                    _margin = null;
+                    await SetupWorldAsync();
+                    return;
+                }
+            }
+            Toasts.Error($"No map file showed up in {server.Settings.InstallDir} (looked for {MapImages.RenderedFilePattern(server)}). Check the console.");
+        }
+        finally
+        {
+            _rendering = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ResetMarginAsync()
+    {
+        _margin = null;
+        await SetupWorldAsync();
+    }
+
+    protected override TimeSpan RefreshInterval => TimeSpan.FromMilliseconds(1500);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Live.PositionsUpdated += OnPositions;
+        Live.KillRecorded += OnKill;
+    }
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _worldSet = false;
+        _selected = null;
+        if (_mapId is not null) await SetupWorldAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Server is null) return;
+        if (_mapId is null)
+        {
+            _ref = DotNetObjectReference.Create(this);
+            try
+            {
+                _mapId = await JS.InvokeAsync<int>("RSM.liveMap.create", _mapEl, _ref);
+                await SetupWorldAsync();
+            }
+            catch (JSDisconnectedException) { }
+        }
+    }
+
+    private async Task SetupWorldAsync()
+    {
+        if (_mapId is null || Server is null) return;
+        var monuments = await Telemetry.GetMonumentsAsync(Id);
+        var image = MapImages.Resolve(Server);
+        if (image?.Url != _lastImageUrl) { _imageWidth = _imageHeight = _autoMargin = 0; _lastImageUrl = image?.Url; }
+        await JS.InvokeVoidAsync("RSM.liveMap.setWorld", _mapId, new
+        {
+            monuments = monuments.Select(m => new { name = m.Name, x = m.X, z = m.Z }),
+            seed = Server.Settings.Seed,
+            size = Server.Settings.WorldSize,
+            imageUrl = image?.Url,
+            imageMargin = _margin ?? MapImages.ManualMargin(Server, image),
+            reportImage = true,
+        });
+        _worldSet = true;
+        await PushOptionsAsync();
+        await LoadHeatAsync();
+        await PushLiveAsync();
+        if (!string.IsNullOrEmpty(FocusPlayer)) await FocusAsync(FocusPlayer);
+    }
+
+    private async Task LoadHeatAsync()
+    {
+        if (_mapId is null || Server is null) return;
+        var from = StatRanges.From(_range, Server.LastWipeUtc);
+        var points = await Heat.GetAsync(Id, Layer, from);
+        _heatLoaded = DateTime.UtcNow;
+        var total = points.Sum(p => p.W);
+        _heatSummary = points.Count == 0
+            ? "Nothing recorded for this period yet."
+            : Layer == HeatLayer.Presence ? $"{total:N0} position samples" : $"{total:N0} events";
+        await JS.InvokeVoidAsync("RSM.liveMap.setHeat", _mapId, points.Select(p => new[] { p.X, p.Z, p.W }),
+            new { radiusMeters = Layer == HeatLayer.Presence ? 40 : 55, intensity = Layer == HeatLayer.Presence ? 0.5 : 0.7 });
+    }
+
+    private async Task PushLiveAsync()
+    {
+        if (_mapId is null || !_worldSet) return;
+        var now = DateTime.UtcNow;
+        var players = World.Players(Id).Select(p => new { id = p.SteamId, name = p.Name, x = p.X, z = p.Z, h = p.Health });
+        var kills = World.RecentKills(Id, 60)
+            .Where(k => (now - k.Timestamp).TotalMinutes < 15 && (k.VictimX != 0 || k.VictimZ != 0))
+            .Select(k => new { x = k.VictimX, z = k.VictimZ, kx = k.KillerX, kz = k.KillerZ, pvp = k.IsPvp, ageSec = (now - k.Timestamp).TotalSeconds });
+        await JS.InvokeVoidAsync("RSM.liveMap.setLive", _mapId, players, kills);
+    }
+
+    private Task PushOptionsAsync() => _mapId is null ? Task.CompletedTask : JS.InvokeVoidAsync("RSM.liveMap.setOptions", _mapId, new
+    {
+        showHeat = _showHeat, showKills = _showKills, showNames = _showNames, showGrid = _showGrid, showMonuments = _showMonuments,
+    }).AsTask();
+
+    private async Task SetOptionAsync(string option, ChangeEventArgs e)
+    {
+        var on = e.Value is true || (e.Value is string s && bool.TryParse(s, out var b) && b);
+        switch (option)
+        {
+            case "showHeat": _showHeat = on; break;
+            case "showKills": _showKills = on; break;
+            case "showNames": _showNames = on; break;
+            case "showGrid": _showGrid = on; break;
+            case "showMonuments": _showMonuments = on; break;
+        }
+        await PushOptionsAsync();
+    }
+
+    private async Task SetRangeAsync(string range)
+    {
+        _range = range;
+        await LoadHeatAsync();
+    }
+
+    private async Task FocusAsync(string steamId)
+    {
+        if (_mapId is null) return;
+        await JS.InvokeVoidAsync("RSM.liveMap.focusPlayer", _mapId, steamId);
+    }
+
+    private async Task ClearSelection()
+    {
+        _selected = null;
+        if (_mapId is not null) await JS.InvokeVoidAsync("RSM.liveMap.focusPlayer", _mapId, (string?)null);
+    }
+
+    [JSInvokable]
+    public async Task OnPlayerClicked(string steamId)
+    {
+        _selected = steamId;
+        await FocusAsync(steamId);
+        StateHasChanged();
+    }
+
+    private void OnPositions(int id)
+    {
+        if (id == Id) RequestRefresh();
+    }
+
+    private void OnKill(int id, KillEvent _)
+    {
+        if (id == Id) RequestRefresh();
+    }
+
+    protected override async Task OnLiveRefreshAsync()
+    {
+        try
+        {
+            await PushLiveAsync();
+            if (DateTime.UtcNow - _heatLoaded > TimeSpan.FromMinutes(1)) await LoadHeatAsync();
+        }
+        catch (JSDisconnectedException) { return; }
+        StateHasChanged();
+    }
+
+    public override void Dispose()
+    {
+        Live.PositionsUpdated -= OnPositions;
+        Live.KillRecorded -= OnKill;
+        base.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        if (_mapId is not null)
+        {
+            try { await JS.InvokeVoidAsync("RSM.liveMap.dispose", _mapId); } catch (JSDisconnectedException) { } catch (TaskCanceledException) { }
+        }
+        _ref?.Dispose();
+    }
+}

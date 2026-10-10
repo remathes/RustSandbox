@@ -1,0 +1,313 @@
+/* =====================================================================
+   Rust Sandbox — "Molten Rust" theme
+   Rusted iron plates, bolted down, with lava-hot seams that slowly pulse.
+   Only applies with <html data-theme="molten">; glow strength via data-glow="off|subtle|strong".
+   ===================================================================== */
+
+html[data-theme="molten"] {
+  --steel-950: #0c0a09;
+  --steel-900: #120f0d;
+  --steel-850: #1a1512;
+  --steel-800: #211a16;
+  --steel-750: #2a211c;
+  --steel-700: #3a2b23;
+  --steel-600: #4d3a2e;
+  --steel-500: #6e5747;
+  --steel-400: #9c8676;
+  --bone: #e8dfd2;
+  --bone-dim: #b5a796;
+  --rust: #d2551f;
+  --rust-hi: #ff7a2e;
+  --rust-lo: #8a3212;
+  --lava: 255, 96, 24;      /* r, g, b of the molten seam */
+  --lava-hot: 255, 176, 72; /* r, g, b at the peak of a pulse */
+  --glow: 1;                /* overall glow strength */
+  --pulse: 5.5s;
+  /* Rust-pitted iron: generated noise, tinted rust, no image files. */
+  --plate-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='800'%3E %3Cfilter id='p' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'%3E %3CfeTurbulence type='fractalNoise' baseFrequency='.0065' numOctaves='5' seed='11' stitchTiles='stitch' result='big'/%3E %3CfeTurbulence type='fractalNoise' baseFrequency='.03' numOctaves='4' seed='5' stitchTiles='stitch' result='mid'/%3E %3CfeTurbulence type='fractalNoise' baseFrequency='.16' numOctaves='2' seed='17' stitchTiles='stitch' result='fine'/%3E %3CfeTurbulence type='fractalNoise' baseFrequency='.02 .0025' numOctaves='3' seed='3' stitchTiles='stitch' result='drip'/%3E %3CfeColorMatrix in='big' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7 -3.35' result='rust'/%3E %3CfeColorMatrix in='big' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 9 -4.9' result='rusthot'/%3E %3CfeColorMatrix in='mid' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 10 -5.6' result='flake'/%3E %3CfeColorMatrix in='mid' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -8 3.2' result='scorch'/%3E %3CfeColorMatrix in='drip' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 8 -4.5' result='drips'/%3E %3CfeColorMatrix in='fine' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -16 5.9' result='pits'/%3E %3CfeFlood flood-color='rgb(29,25,22)' result='base'/%3E %3CfeFlood flood-color='rgb(90,42,20)'/%3E%3CfeComposite in2='rust' operator='in' result='c1'/%3E %3CfeFlood flood-color='rgb(141,63,23)'/%3E%3CfeComposite in2='rusthot' operator='in' result='c2'/%3E %3CfeFlood flood-color='rgb(179,90,34)'/%3E%3CfeComposite in2='flake' operator='in'/%3E%3CfeComposite in2='rust' operator='in' result='c3'/%3E %3CfeFlood flood-color='rgb(74,34,16)'/%3E%3CfeComposite in2='drips' operator='in' result='c4'/%3E %3CfeFlood flood-color='rgb(10,8,7)' flood-opacity='.75'/%3E%3CfeComposite in2='scorch' operator='in' result='c5'/%3E %3CfeFlood flood-color='rgb(5,4,3)' flood-opacity='.8'/%3E%3CfeComposite in2='pits' operator='in' result='c6'/%3E %3CfeMerge result='colour'%3E%3CfeMergeNode in='base'/%3E%3CfeMergeNode in='c4'/%3E%3CfeMergeNode in='c1'/%3E%3CfeMergeNode in='c2'/%3E%3CfeMergeNode in='c3'/%3E%3CfeMergeNode in='c5'/%3E%3CfeMergeNode in='c6'/%3E%3C/feMerge%3E %3CfeComposite in='rust' in2='flake' operator='arithmetic' k2='.55' k3='.35' result='h1'/%3E %3CfeComposite in='h1' in2='fine' operator='arithmetic' k2='1' k3='.22' k4='-.08' result='h2'/%3E %3CfeComposite in='h2' in2='pits' operator='arithmetic' k2='1' k3='-.4' result='height'/%3E %3CfeDiffuseLighting in='height' surfaceScale='4' diffuseConstant='1.25' lighting-color='rgb(255,255,255)' result='light'%3E %3CfeDistantLight azimuth='225' elevation='48'/%3E %3C/feDiffuseLighting%3E %3CfeSpecularLighting in='height' surfaceScale='4' specularConstant='.5' specularExponent='18' lighting-color='rgb(255,217,176)' result='spec'%3E %3CfeDistantLight azimuth='225' elevation='48'/%3E %3C/feSpecularLighting%3E %3CfeComposite in='spec' in2='SourceGraphic' operator='in' result='spec2'/%3E %3CfeBlend in='colour' in2='light' mode='multiply' result='lit'/%3E %3CfeComposite in='lit' in2='spec2' operator='arithmetic' k2='1.15' k3='.25'/%3E %3C/filter%3E %3Crect width='100%25' height='100%25' fill='rgb(0,0,0)' filter='url(%23p)'/%3E %3C/svg%3E");
+  --bolt-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E %3Cdefs%3E %3CradialGradient id='w' cx='40%25' cy='35%25' r='72%25'%3E%3Cstop offset='0' stop-color='rgb(92,74,62)'/%3E%3Cstop offset='.65' stop-color='rgb(44,33,27)'/%3E%3Cstop offset='1' stop-color='rgb(18,13,10)'/%3E%3C/radialGradient%3E %3ClinearGradient id='h' x1='.15' y1='.05' x2='.85' y2='.95'%3E%3Cstop offset='0' stop-color='rgb(143,115,98)'/%3E%3Cstop offset='.45' stop-color='rgb(79,58,46)'/%3E%3Cstop offset='1' stop-color='rgb(27,19,15)'/%3E%3C/linearGradient%3E %3ClinearGradient id='top' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='rgb(110,84,68)'/%3E%3Cstop offset='1' stop-color='rgb(51,37,29)'/%3E%3C/linearGradient%3E %3Cfilter id='r' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'%3E %3CfeTurbulence type='fractalNoise' baseFrequency='.35' numOctaves='3' seed='4'/%3E %3CfeColorMatrix values='0 0 0 0 .55 0 0 0 0 .22 0 0 0 0 .07 0 0 0 7 -3.6'/%3E %3CfeComposite in2='SourceGraphic' operator='in'/%3E %3C/filter%3E %3C/defs%3E %3Ccircle cx='21.5' cy='22.5' r='18' fill='rgb(0,0,0)' opacity='.6'/%3E %3Ccircle cx='20' cy='20' r='17.4' fill='url(%23w)' stroke='rgb(12,8,6)' stroke-width='1'/%3E %3Ccircle cx='20' cy='20' r='15.8' fill='none' stroke='rgb(160,134,114)' stroke-opacity='.25' stroke-width='.8'/%3E %3Cpolygon points='20,5.5 32.6,12.8 32.6,27.2 20,34.5 7.4,27.2 7.4,12.8' fill='url(%23h)' stroke='rgb(11,7,5)' stroke-width='1.3'/%3E %3Cpolygon points='20,5.5 32.6,12.8 28.2,15.4 20,10.7' fill='rgb(210,184,162)' opacity='.42'/%3E %3Cpolygon points='7.4,12.8 20,5.5 20,10.7 11.8,15.4' fill='rgb(233,212,192)' opacity='.36'/%3E %3Cpolygon points='32.6,27.2 20,34.5 20,29.3 28.2,24.6' fill='rgb(0,0,0)' opacity='.42'/%3E %3Cpolygon points='32.6,12.8 32.6,27.2 28.2,24.6 28.2,15.4' fill='rgb(0,0,0)' opacity='.25'/%3E %3Cpolygon points='20,10.7 28.2,15.4 28.2,24.6 20,29.3 11.8,24.6 11.8,15.4' fill='url(%23top)'/%3E %3Ccircle cx='20' cy='20' r='17.4' fill='rgb(0,0,0)' filter='url(%23r)'/%3E %3Cpath d='M9 13.4 L20 7 L31 13.4' fill='none' stroke='rgb(244,226,208)' stroke-opacity='.4' stroke-width='.8'/%3E %3C/svg%3E");
+  --tread-texture: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E %3Cdefs%3E %3ClinearGradient id='b' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='rgb(59,58,57)'/%3E%3Cstop offset='.5' stop-color='rgb(38,37,36)'/%3E%3Cstop offset='1' stop-color='rgb(13,12,12)'/%3E%3C/linearGradient%3E %3C/defs%3E %3Crect width='28' height='28' fill='rgb(22,21,21)'/%3E %3Cg transform='translate(7 7) rotate(45)'%3E%3Crect x='-6' y='-1.8' width='12' height='3.6' rx='1.8' fill='url(%23b)'/%3E%3Crect x='-5' y='-1.5' width='10' height='1' rx='.5' fill='rgb(90,88,86)' opacity='.5'/%3E%3C/g%3E %3Cg transform='translate(21 21) rotate(45)'%3E%3Crect x='-6' y='-1.8' width='12' height='3.6' rx='1.8' fill='url(%23b)'/%3E%3Crect x='-5' y='-1.5' width='10' height='1' rx='.5' fill='rgb(90,88,86)' opacity='.5'/%3E%3C/g%3E %3Cg transform='translate(21 7) rotate(-45)'%3E%3Crect x='-6' y='-1.8' width='12' height='3.6' rx='1.8' fill='url(%23b)'/%3E%3Crect x='-5' y='-1.5' width='10' height='1' rx='.5' fill='rgb(90,88,86)' opacity='.5'/%3E%3C/g%3E %3Cg transform='translate(7 21) rotate(-45)'%3E%3Crect x='-6' y='-1.8' width='12' height='3.6' rx='1.8' fill='url(%23b)'/%3E%3Crect x='-5' y='-1.5' width='10' height='1' rx='.5' fill='rgb(90,88,86)' opacity='.5'/%3E%3C/g%3E %3C/svg%3E");
+  --skyline: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1600' height='320' viewBox='0 0 1600 320'%3E %3Cdefs%3E %3ClinearGradient id='f' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='rgb(24,18,15)'/%3E%3Cstop offset='1' stop-color='rgb(10,8,7)'/%3E%3C/linearGradient%3E %3ClinearGradient id='b' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='rgb(34,25,20)'/%3E%3Cstop offset='1' stop-color='rgb(16,12,10)'/%3E%3C/linearGradient%3E %3C/defs%3E %3Cg fill='url(%23b)' opacity='.75'%3E %3Crect x='60' y='210' width='180' height='110'/%3E%3Crect x='420' y='190' width='120' height='130'/%3E%3Crect x='980' y='200' width='220' height='120'/%3E %3Crect x='1320' y='180' width='90' height='140'/%3E%3Crect x='1430' y='225' width='170' height='95'/%3E %3Crect x='700' y='150' width='26' height='170'/%3E%3Crect x='740' y='120' width='22' height='200'/%3E %3C/g%3E %3Cg fill='none' stroke='rgb(26,19,16)' stroke-width='5'%3E %3Cpath d='M190 320 L250 40 L310 320 M205 250 L295 250 M220 180 L280 180 M232 120 L268 120 M205 250 L280 180 L232 120 M295 250 L220 180 L268 120'/%3E %3Cpath d='M250 40 L250 20'/%3E %3Cpath d='M1140 320 L1140 70 L1330 70 M1140 110 L1200 70 M1150 70 L1150 320 M1290 70 L1290 130'/%3E %3C/g%3E %3Cg fill='url(%23f)'%3E %3Cpath d='M0 320 L0 260 L120 260 L120 240 L300 240 L300 270 L380 270 L380 230 L560 230 L560 262 L640 262 L640 250 L820 250 L820 236 L900 236 L900 268 L1060 268 L1060 244 L1240 244 L1240 266 L1380 266 L1380 238 L1520 238 L1520 258 L1600 258 L1600 320 Z'/%3E %3Crect x='610' y='160' width='20' height='100'/%3E%3Crect x='860' y='175' width='18' height='70'/%3E %3C/g%3E %3Cg fill='rgb(255,140,60)' opacity='.5'%3E %3Crect x='1003' y='222' width='8' height='5'/%3E%3Crect x='1031' y='222' width='8' height='5'/%3E%3Crect x='446' y='206' width='7' height='5'/%3E %3Crect x='88' y='228' width='7' height='5'/%3E%3Crect x='1458' y='240' width='7' height='5'/%3E %3C/g%3E %3C/svg%3E");
+  --rust-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55  0 0 0 0 .22  0 0 0 0 .08  0 0 0 .9 -.32'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  --page-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='q'><feTurbulence type='turbulence' baseFrequency='.03' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 .35  0 0 0 0 .13  0 0 0 0 .04  0 0 0 .55 -.32'/></filter><rect width='100%25' height='100%25' filter='url(%23q)'/></svg>");
+  --pits-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='p'><feTurbulence type='turbulence' baseFrequency='.035' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 .42  0 0 0 0 .16  0 0 0 0 .05  0 0 0 1.4 -.78'/></filter><rect width='100%25' height='100%25' filter='url(%23p)'/></svg>");
+}
+html[data-theme="molten"][data-glow="subtle"] { --glow: .55; }
+html[data-theme="molten"][data-glow="strong"] { --glow: 1.35; }
+
+/* ---- the page: blackened steel with embers rising from below ---- */
+html[data-theme="molten"] body { background: #121010; }
+html[data-theme="molten"] body::after {
+  content: ""; position: fixed; inset: 0; z-index: -2; pointer-events: none; will-change: transform;
+  background:
+    radial-gradient(ellipse 90% 40% at 50% 112%, rgba(var(--lava), calc(.22 * var(--glow))), transparent 70%),
+    var(--skyline) left bottom / 1600px 320px repeat-x,
+    radial-gradient(ellipse 80% 50% at 70% 85%, rgba(120,60,30,.18), transparent 70%),
+    radial-gradient(ellipse 70% 55% at 20% 10%, rgba(150,140,130,.07), transparent 70%),
+    linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,0) 30%),
+    linear-gradient(180deg, #121010, #1a1412 70%, #24170f);
+}
+/* the user's own picture (Preferences), darkened and softly blurred so the plates stand out */
+html[data-theme="molten"][data-photo] body::before {
+  content: ""; position: fixed; inset: -24px; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(ellipse 85% 75% at 50% 45%, transparent 40%, rgba(0,0,0,.6)),
+    var(--page-photo) center / cover no-repeat;
+  filter: blur(3px) brightness(.5) saturate(.85);
+  will-change: transform;
+}
+html[data-theme="molten"] .spark-field { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+
+/* ---- plates ----
+   The plate itself is drawn on ::after (behind the content) and the molten seam on ::before (behind the plate).
+   Both go through the #molten-edge displacement filter from theme.js, so the plate edge comes out torn and
+   the seam glows out from under it, without bending the text inside. */
+html[data-theme="molten"] .panel,
+html[data-theme="molten"] .fleet-card,
+html[data-theme="molten"] .gauge,
+html[data-theme="molten"] .plate {
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: 0 16px 30px rgba(0,0,0,.7);
+}
+
+html[data-theme="molten"] .panel::after,
+html[data-theme="molten"] .fleet-card::after,
+html[data-theme="molten"] .gauge::after,
+html[data-theme="molten"] .plate::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; border-radius: 4px;
+  background:
+    linear-gradient(135deg, rgba(255,235,215,.07), transparent 40%, rgba(0,0,0,.35)),
+    linear-gradient(rgba(14,10,8,.5), rgba(14,10,8,.5)),
+    var(--plate-texture) 0 0 / 800px 800px,
+    #1d1916;
+  background-position: 0 0, 0 0, var(--tex-x, 0) var(--tex-y, 0), 0 0;
+  box-shadow:
+    inset 0 0 0 1px rgba(0,0,0,.8),
+    inset 0 0 3px 1px rgba(var(--lava-hot), calc(.55 * var(--glow))),
+    inset 0 0 calc(26px * var(--glow)) rgba(var(--lava), calc(.38 * var(--glow))),
+    inset 3px 3px 6px rgba(255,230,200,.06),
+    inset -6px -8px 14px rgba(0,0,0,.5);
+  filter: url(#molten-edge);
+  will-change: transform;
+}
+html[data-theme="molten"] .panel::before,
+html[data-theme="molten"] .fleet-card::before,
+html[data-theme="molten"] .gauge::before,
+html[data-theme="molten"] .plate::before {
+  content: ""; position: absolute; inset: -4px; z-index: -2; pointer-events: none; border-radius: 6px;
+  border: 5px solid rgb(255, 150, 60);
+  filter: url(#molten-edge) blur(.6px) drop-shadow(0 0 2px rgba(255,236,190,.9)) drop-shadow(0 0 calc(10px * var(--glow)) rgba(var(--lava), .9));
+  opacity: .8;
+  will-change: opacity;
+  animation: molten-seam var(--pulse) ease-in-out infinite;
+  animation-delay: var(--pulse-delay, 0s);
+}
+html[data-theme="molten"] .panel:hover::before,
+html[data-theme="molten"] .fleet-card:hover::before,
+html[data-theme="molten"] .gauge:hover::before,
+html[data-theme="molten"] .plate:hover::before { animation: none; opacity: 1; }
+@keyframes molten-seam {
+  0%, 100% { opacity: .5; }
+  50% { opacity: 1; }
+}
+html[data-theme="molten"][data-glow="subtle"] .panel::before,
+html[data-theme="molten"][data-glow="subtle"] .fleet-card::before,
+html[data-theme="molten"][data-glow="subtle"] .gauge::before,
+html[data-theme="molten"][data-glow="subtle"] .plate::before { animation-name: molten-seam-subtle; }
+@keyframes molten-seam-subtle {
+  0%, 100% { opacity: .3; }
+  50% { opacity: .6; }
+}
+
+/* the server colour on fleet cards as a hot stripe (the plate uses ::after, so it lives on the bolts layer) */
+html[data-theme="molten"] .fleet-card > .bolts::before {
+  content: ""; position: absolute; left: 0; top: 46px; bottom: 46px; width: 3px; border-radius: 2px;
+  background: var(--fc, var(--rust)); box-shadow: 0 0 8px var(--fc, var(--rust));
+}
+
+/* ---- plate header: a heavier riveted strip ---- */
+html[data-theme="molten"] .panel-head {
+  border-bottom: 1px solid rgba(var(--lava), .28);
+  box-shadow: 0 1px 0 rgba(0,0,0,.6);
+  background: linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,.3));
+  padding: 18px 56px 16px;
+}
+html[data-theme="molten"] .panel-body { padding-left: 26px; padding-right: 26px; }
+html[data-theme="molten"] .panel > .panel-body:last-of-type { padding-bottom: 46px; }
+html[data-theme="molten"] .panel > .panel-body.flush:last-of-type { padding-bottom: 44px; }
+html[data-theme="molten"] .panel-body.flush { padding: 0 0 44px; }
+html[data-theme="molten"] .panel-body.flush .table td:first-child,
+html[data-theme="molten"] .panel-body.flush .table th:first-child { padding-left: 24px; }
+html[data-theme="molten"] .panel-body.flush .table td:last-child,
+html[data-theme="molten"] .panel-body.flush .table th:last-child { padding-right: 24px; }
+html[data-theme="molten"] .fleet-card { padding: 24px 50px 40px; }
+html[data-theme="molten"] .panel-head h2,
+html[data-theme="molten"] .panel-head h3 { text-shadow: 0 1px 0 #000, 0 0 12px rgba(var(--lava), calc(.25 * var(--glow))); }
+html[data-theme="molten"] h1 { text-shadow: 0 2px 0 #000, 0 0 18px rgba(var(--lava), calc(.35 * var(--glow))); }
+
+/* inner tiles look like small inset plates */
+html[data-theme="molten"] .duel > div {
+  background: linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,.2)), var(--plate-texture) 30px 70px / 900px 900px, #1f1f1e;
+  border: 1px solid #36271e;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.6);
+}
+
+/* ---- server header bar: a long bolted plate ---- */
+html[data-theme="molten"] .plate { margin: 14px 22px 0; padding: 16px 50px; border-bottom: 0; min-height: 76px; }
+html[data-theme="molten"] .plate .bolt { width: 26px; height: 26px; }
+
+/* ---- stat gauges: a row of small separate plates ---- */
+html[data-theme="molten"] .gauges { background: none; border: 0; gap: 16px; overflow: visible; }
+html[data-theme="molten"] .gauge { border-right: 0; padding: 18px 22px 30px; }
+html[data-theme="molten"] .gauge .val { text-shadow: 0 2px 0 #000, 0 0 14px rgba(var(--lava), calc(.3 * var(--glow))); }
+html[data-theme="molten"] .gauge .bolt { width: 22px; height: 22px; }
+html[data-theme="molten"] .gauge .lbl { color: var(--bone-dim); }
+html[data-theme="molten"] .gauge .foot { color: var(--bone); }
+html[data-theme="molten"] .gauge .bolt.tl, html[data-theme="molten"] .gauge .bolt.tr { display: none; }
+
+/* ---- the map sits in a heavy rusted frame ---- */
+html[data-theme="molten"] .map-wrap {
+  border: 14px solid #2a1c14;
+  border-image: var(--plate-texture) 40 / 14px stretch;
+  border-radius: 0;
+  box-shadow: 0 0 0 1px #000, 0 0 calc(14px * var(--glow)) rgba(var(--lava), calc(.35 * var(--glow))), 0 10px 22px rgba(0,0,0,.7);
+}
+html[data-theme="molten"] .map-wrap::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 4;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.9), inset 4px 4px 10px rgba(0,0,0,.75), inset -2px -2px 6px rgba(255,200,150,.08);
+}
+
+/* ---- sidebar: dark scorched iron, each link a small metal tab with a rivet ---- */
+html[data-theme="molten"] .rail {
+  background:
+    linear-gradient(90deg, rgba(10,8,7,.86), rgba(10,8,7,.92)),
+    var(--plate-texture) 0 0 / 800px 800px,
+    #120e0c;
+  border-right: 1px solid #000;
+  box-shadow: inset -1px 0 0 rgba(var(--lava), calc(.35 * var(--glow))), 4px 0 18px rgba(0,0,0,.6);
+}
+html[data-theme="molten"] .nav-link {
+  margin-bottom: 4px; padding: 8px 30px 8px 10px; border-radius: 3px;
+  background: linear-gradient(180deg, #241d19, #17120f);
+  border: 1px solid #0b0806;
+  box-shadow: inset 0 1px 0 rgba(255,230,200,.07), inset 0 -1px 0 rgba(0,0,0,.6), 0 1px 2px rgba(0,0,0,.6);
+}
+html[data-theme="molten"] .nav-link::after {
+  content: ""; position: absolute; right: 9px; top: calc(50% - 5px); width: 10px; height: 10px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #8a7262, #3a2a20 55%, #120c09);
+  box-shadow: 0 1px 1px rgba(0,0,0,.8);
+}
+html[data-theme="molten"] .nav-link:has(.badge)::after,
+html[data-theme="molten"] .nav-link:has(kbd)::after { display: none; }
+html[data-theme="molten"] .nav-link:has(.badge), html[data-theme="molten"] .nav-link:has(kbd) { padding-right: 10px; }
+html[data-theme="molten"] .nav-link:hover {
+  background: linear-gradient(180deg, #2f2520, #1d1713); color: var(--bone);
+  box-shadow: inset 0 1px 0 rgba(255,230,200,.09), inset 0 0 0 1px rgba(var(--lava), .25), 0 1px 2px rgba(0,0,0,.6);
+}
+html[data-theme="molten"] .rail-foot { border-top-color: #2a201a; }
+html[data-theme="molten"] .rail-foot button.nav-link { background: linear-gradient(180deg, #241d19, #17120f); border: 1px solid #0b0806; }
+html[data-theme="molten"] .switcher-btn {
+  background: linear-gradient(180deg, #2a221d, #18120f); border-color: #0b0806;
+  box-shadow: inset 0 1px 0 rgba(255,230,200,.08), 0 2px 4px rgba(0,0,0,.6);
+}
+
+/* ---- bolts (injected by theme script) ---- */
+html[data-theme="molten"] .bolts { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
+html[data-theme="molten"] .bolt {
+  position: absolute; width: 38px; height: 38px;
+  --r: 0deg;
+  transform: rotate(var(--r));
+  background: var(--bolt-image) center / contain no-repeat;
+}
+html[data-theme="molten"] .bolt.tl { top: 4px; left: 4px; }
+html[data-theme="molten"] .bolt.tr { top: 4px; right: 4px; }
+html[data-theme="molten"] .bolt.bl { bottom: 4px; left: 4px; }
+html[data-theme="molten"] .bolt.br { bottom: 4px; right: 4px; }
+
+
+/* a bolt working itself loose: rattles, spins, backs out a little, then tightens again */
+html[data-theme="molten"] .bolt.loose { animation: bolt-loose 2.2s cubic-bezier(.3,.7,.4,1) 1; }
+@keyframes bolt-loose {
+  0%   { transform: rotate(var(--r)) translate(0,0) scale(1); }
+  8%   { transform: rotate(calc(var(--r) + 14deg)) translate(.6px,-.4px) scale(1.04); }
+  14%  { transform: rotate(calc(var(--r) - 10deg)) translate(-.6px,.3px) scale(1.04); }
+  20%  { transform: rotate(calc(var(--r) + 22deg)) translate(.5px,-.6px) scale(1.06); }
+  55%  { transform: rotate(calc(var(--r) + 540deg)) translate(0,-1.4px) scale(1.14); filter: drop-shadow(0 3px 2px rgba(0,0,0,.9)); }
+  80%  { transform: rotate(calc(var(--r) + 690deg)) translate(0,-.4px) scale(1.04); }
+  90%  { transform: rotate(calc(var(--r) + 716deg)) translate(-.3px,0) scale(1); }
+  100% { transform: rotate(calc(var(--r) + 720deg)) translate(0,0) scale(1); }
+}
+/* once in a while one stays loose and crooked until someone hovers over its plate */
+html[data-theme="molten"] .bolt.hanging {
+  animation: bolt-hang 1.6s ease-out 1 forwards;
+}
+@keyframes bolt-hang {
+  0%   { transform: rotate(var(--r)) translate(0,0); }
+  60%  { transform: rotate(calc(var(--r) + 430deg)) translate(1px,1.5px) scale(1.1); }
+  100% { transform: rotate(calc(var(--r) + 397deg)) translate(1.5px,2px) scale(1.06); filter: drop-shadow(0 3px 2px rgba(0,0,0,.95)); }
+}
+
+/* ---- buttons: heated metal ---- */
+html[data-theme="molten"] .btn {
+  background: linear-gradient(180deg, #2c231e, #1d1714);
+  border-color: #4a382c;
+  box-shadow: inset 0 1px 0 rgba(255,235,210,.06), 0 1px 0 #000;
+}
+html[data-theme="molten"] .btn:hover { background: linear-gradient(180deg, #3a2d25, #251d18); }
+html[data-theme="molten"] .btn.primary {
+  color: #fff8ef;
+  border-color: #ffab5e;
+  background: radial-gradient(ellipse 80% 120% at 50% 45%, #ff9a3c, #e0601f 48%, #8a3212 100%);
+  box-shadow: 0 0 calc(12px * var(--glow)) rgba(var(--lava), calc(.55 * var(--glow))), inset 0 1px 0 rgba(255,240,200,.4);
+  text-shadow: 0 1px 1px rgba(80,20,0,.8);
+}
+html[data-theme="molten"] .btn.primary:hover {
+  background: radial-gradient(ellipse 80% 120% at 50% 45%, #ffc06a, #ff7a2e 48%, #a33c14 100%);
+  box-shadow: 0 0 calc(20px * var(--glow)) rgba(var(--lava-hot), calc(.7 * var(--glow))), inset 0 1px 0 rgba(255,240,200,.5);
+}
+html[data-theme="molten"] .btn.danger {
+  border-color: rgba(255,90,60,.7); color: #ffb39e;
+  box-shadow: 0 0 calc(10px * var(--glow)) rgba(255,60,30, calc(.35 * var(--glow)));
+}
+html[data-theme="molten"] .btn.ghost { background: transparent; border-color: transparent; box-shadow: none; }
+
+/* ---- navigation ---- */
+html[data-theme="molten"] .nav-link.active {
+  color: #fff6ec;
+  background: radial-gradient(ellipse 90% 140% at 30% 50%, #e8712c, #b5481a 55%, #6e2a10);
+  border-color: #3a1607;
+  box-shadow: inset 0 1px 0 rgba(255,220,170,.35), inset 0 -1px 0 rgba(0,0,0,.4), 0 0 calc(12px * var(--glow)) rgba(var(--lava), calc(.5 * var(--glow)));
+  text-shadow: 0 1px 1px rgba(60,15,0,.8);
+}
+html[data-theme="molten"] .nav-link.active::before { display: none; }
+
+/* ---- tabs, badges, inputs ---- */
+html[data-theme="molten"] .tabs button.on { border-bottom-color: rgb(var(--lava)); text-shadow: 0 0 10px rgba(var(--lava), .5); }
+html[data-theme="molten"] .badge.rust { background: rgba(var(--lava), .2); color: #ffb27a; box-shadow: 0 0 8px rgba(var(--lava), calc(.35 * var(--glow))); }
+html[data-theme="molten"] .input,
+html[data-theme="molten"] .field input,
+html[data-theme="molten"] .field select { background: #120e0c; border-color: #463428; box-shadow: inset 0 2px 4px rgba(0,0,0,.6); }
+
+/* ---- glow off / reduced motion: keep the plates and bolts, drop the movement ---- */
+html[data-theme="molten"][data-glow="off"] .panel::before,
+html[data-theme="molten"][data-glow="off"] .fleet-card::before,
+html[data-theme="molten"][data-glow="off"] .gauge::before,
+html[data-theme="molten"][data-glow="off"] .plate::before,
+html[data-theme="molten"][data-glow="off"] .bolt { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="molten"] .panel::before,
+  html[data-theme="molten"] .fleet-card::before,
+  html[data-theme="molten"] .gauge::before,
+  html[data-theme="molten"] .plate::before,
+  html[data-theme="molten"] .bolt { animation: none !important; }
+}
+
+/* small screens: fewer bolts, softer glow */
+@media (max-width: 860px) {
+  html[data-theme="molten"] .bolt { width: 30px; height: 30px; }
+  html[data-theme="molten"] { --glow: .7; }
+}

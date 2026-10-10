@@ -1,0 +1,339 @@
+@page "/s/{Id:int}/console"
+@inherits ServerPageBase
+@inject IJSRuntime JS
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<PageTitle>@(Server?.Name ?? "Server") · Console</PageTitle>
+
+@if (Server is not null)
+{
+    var lines = Visible();
+    <div class="page">
+        <div class="grid g-side">
+            <div>
+                <div class="row" style="margin-bottom:10px">
+                    <div class="seg" role="group" aria-label="Filter">
+                        @foreach (var (key, label) in Filters)
+                        {
+                            <button class="@(_filter == key ? "on" : "")" @onclick="() => SetFilter(key)">@label</button>
+                        }
+                    </div>
+                    <input class="input" style="max-width:240px;min-height:30px;padding:4px 10px" placeholder="Search output" @bind="_search" @bind:event="oninput" />
+                    <span class="spacer" style="flex:1"></span>
+                    <span class="muted" style="font-size:13px">@lines.Count lines</span>
+                    <button class="btn sm ghost" @onclick="Clear">Clear</button>
+                </div>
+                <div class="console">
+                    <div class="console-out" @ref="_out" role="log" aria-live="off">
+                        @if (lines.Count == 0)
+                        {
+                            <div class="cl k-System"><time></time><span>@(Runtime.IsOnline ? "Waiting for server output…" : "Not connected. Output appears here once RCON connects.")</span></div>
+                        }
+                        @foreach (var l in lines)
+                        {
+                            <div class="cl k-@l.Kind"><time>@Fmt.Local(l.Time, "HH:mm:ss")</time><span>@l.Text</span></div>
+                        }
+                    </div>
+                    <div class="console-in">
+                        @if (_suggestions.Count > 0)
+                        {
+                            <div class="suggest">
+                                @for (var i = 0; i < _suggestions.Count; i++)
+                                {
+                                    var s = _suggestions[i];
+                                    var idx = i;
+                                    <button class="@(idx == _sugIndex ? "on" : "")" @onclick="() => Accept(s)">@s.Usage <span>@s.Description</span></button>
+                                }
+                            </div>
+                        }
+                        <label class="prompt" for="cmd">›</label>
+                        <input id="cmd" @ref="_input" value="@_command" @oninput="OnInput" @onkeydown="OnKey"
+                               placeholder="@(Runtime.IsOnline ? "Type a command — Tab completes, ↑ ↓ history" : "Not connected")" autocomplete="off" spellcheck="false" />
+                        <button class="btn primary sm" @onclick="SendAsync" disabled="@(string.IsNullOrWhiteSpace(_command))">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stack">
+                <section class="panel">
+                    <div class="panel-head"><h2>Quick commands</h2><span class="spacer"></span><button class="btn sm ghost" @onclick="() => _editing = !_editing">@(_editing ? "Done" : "Edit")</button></div>
+                    <div class="panel-body">
+                        <div class="macros">
+                            @foreach (var m in _macros)
+                            {
+                                if (_editing)
+                                {
+                                    <button class="btn sm danger" title="Remove" @onclick="() => DeleteMacroAsync(m)">✕ @m.Label</button>
+                                }
+                                else
+                                {
+                                    <button class="btn sm" title="@m.Command" @onclick="() => RunMacro(m)">@m.Label</button>
+                                }
+                            }
+                        </div>
+                        @if (_editing)
+                        {
+                            <div class="stack" style="gap:8px;margin-top:12px">
+                                <input class="input" placeholder="Button label" @bind="_newLabel" />
+                                <input class="input mono" placeholder="Command, e.g. env.time 9" @bind="_newCommand" />
+                                <label class="check"><input type="checkbox" @bind="_newGlobal" /><span><b>Show on every server</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="_newConfirm" /><span><b>Ask before running</b></span></label>
+                                <button class="btn" @onclick="AddMacroAsync" disabled="@(string.IsNullOrWhiteSpace(_newLabel) || string.IsNullOrWhiteSpace(_newCommand))">Add button</button>
+                            </div>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Chat</h2><span class="spacer"></span><span class="hint">@Runtime.Chat.Count messages</span></div>
+                    <div class="panel-body flush">
+                        <ul class="feed" style="max-height:340px;overflow-y:auto">
+                            @foreach (var c in Runtime.Chat.Last(40).AsEnumerable().Reverse())
+                            {
+                                <li>
+                                    <div class="who">
+                                        <b>@c.Name</b>
+                                        @if (c.IsTeam)
+                                        {
+                                            <span class="badge" style="margin-left:6px">team</span>
+                                        }
+                                    </div>
+                                    <div class="how" style="color:var(--bone)">@c.Message</div>
+                                    <time class="when">@Fmt.Local(c.Time, "HH:mm")</time>
+                                </li>
+                            }
+                            @if (Runtime.Chat.Count == 0)
+                            {
+                                <li class="muted">No chat yet.</li>
+                            }
+                        </ul>
+                        <div class="row" style="padding:10px 12px;border-top:1px solid var(--steel-750);flex-wrap:nowrap">
+                            <input class="input" placeholder="Message everyone as SERVER" @bind="_say" @onkeydown="SayKey" />
+                            <button class="btn" @onclick="SayAsync" disabled="@(string.IsNullOrWhiteSpace(_say))">Send</button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <ConfirmDialog @bind-Visible="_confirmOpen" Title="@($"Run “{_pending?.Label}”?")" ConfirmText="Run" OnConfirm="RunPending">
+        <p><code>@_pending?.Command</code></p>
+    </ConfirmDialog>
+}
+
+@code {
+    private static readonly (string Key, string Label)[] Filters =
+    {
+        ("all", "Everything"), ("mine", "Commands"), ("chat", "Chat"), ("problems", "Warnings & errors"),
+    };
+
+    private ElementReference _out, _input;
+    private string _filter = "all";
+    private string _search = "";
+    private string _command = "";
+    private string _say = "";
+    private bool _stick = true;
+    private DateTime _clearedAt = DateTime.MinValue;
+    private readonly List<string> _history = new();
+    private int _historyIndex = -1;
+    private List<RustCommands.Command> _suggestions = new();
+    private int _sugIndex;
+    private List<CommandMacro> _macros = new();
+    private bool _editing, _newGlobal = true, _newConfirm, _confirmOpen;
+    private string _newLabel = "", _newCommand = "";
+    private CommandMacro? _pending;
+
+    protected override TimeSpan RefreshInterval => TimeSpan.FromMilliseconds(250);
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+        Live.ConsoleLineAdded += OnLine;
+    }
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _stick = true;
+        await LoadMacrosAsync();
+    }
+
+    private void OnLine(int id, ConsoleLine _)
+    {
+        if (id == Id) RequestRefresh();
+    }
+
+    protected override async Task OnLiveRefreshAsync()
+    {
+        try { _stick = await JS.InvokeAsync<bool>("RSM.console.isNearBottom", _out); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { return; }
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_stick)
+        {
+            try { await JS.InvokeVoidAsync("RSM.console.scrollToBottom", _out); } catch (JSException) { } catch (JSDisconnectedException) { }
+        }
+        if (firstRender)
+        {
+            try { await JS.InvokeVoidAsync("RSM.console.bindInput", _input); } catch (JSException) { } catch (JSDisconnectedException) { }
+        }
+    }
+
+    private List<ConsoleLine> Visible()
+    {
+        IEnumerable<ConsoleLine> q = Runtime.Console.Snapshot().Where(l => l.Time > _clearedAt);
+        q = _filter switch
+        {
+            "mine" => q.Where(l => l.Kind is ConsoleKind.Command or ConsoleKind.Response or ConsoleKind.System),
+            "chat" => q.Where(l => l.Kind == ConsoleKind.Chat),
+            "problems" => q.Where(l => l.Kind is ConsoleKind.Warning or ConsoleKind.Error),
+            _ => q,
+        };
+        if (!string.IsNullOrWhiteSpace(_search)) q = q.Where(l => l.Text.Contains(_search, StringComparison.OrdinalIgnoreCase));
+        var list = q.ToList();
+        return list.Count > 800 ? list.GetRange(list.Count - 800, 800) : list;
+    }
+
+    private void SetFilter(string key)
+    {
+        _filter = key;
+        _stick = true;
+    }
+
+    private void Clear()
+    {
+        _clearedAt = DateTime.UtcNow;
+        Toasts.Show("Console view cleared. The server log is unaffected.");
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        _command = e.Value?.ToString() ?? "";
+        _suggestions = RustCommands.Suggest(_command).ToList();
+        _sugIndex = 0;
+    }
+
+    private void Accept(RustCommands.Command c)
+    {
+        _command = c.Name + " ";
+        _suggestions.Clear();
+        _ = JS.InvokeVoidAsync("RSM.focus", _input);
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Enter":
+                await SendAsync();
+                break;
+            case "Tab":
+                if (_suggestions.Count > 0) Accept(_suggestions[_sugIndex]);
+                break;
+            case "ArrowUp":
+                if (_suggestions.Count > 0) { _sugIndex = (_sugIndex - 1 + _suggestions.Count) % _suggestions.Count; break; }
+                if (_history.Count == 0) break;
+                _historyIndex = _historyIndex < 0 ? _history.Count - 1 : Math.Max(0, _historyIndex - 1);
+                _command = _history[_historyIndex];
+                break;
+            case "ArrowDown":
+                if (_suggestions.Count > 0) { _sugIndex = (_sugIndex + 1) % _suggestions.Count; break; }
+                if (_historyIndex < 0) break;
+                _historyIndex++;
+                if (_historyIndex >= _history.Count) { _historyIndex = -1; _command = ""; }
+                else _command = _history[_historyIndex];
+                break;
+            case "Escape":
+                _suggestions.Clear();
+                break;
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        var cmd = _command.Trim();
+        if (cmd.Length == 0) return;
+        _command = "";
+        _suggestions.Clear();
+        _historyIndex = -1;
+        _history.Remove(cmd);
+        _history.Add(cmd);
+        if (_history.Count > 100) _history.RemoveAt(0);
+        _stick = true;
+        await Connections.ExecuteAsync(Id, cmd);
+    }
+
+    private async Task SayKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SayAsync();
+    }
+
+    private async Task SayAsync()
+    {
+        var msg = _say.Trim();
+        if (msg.Length == 0) return;
+        _say = "";
+        await Connections.ExecuteAsync(Id, "say " + Fmt.Quote(msg));
+    }
+
+    // ---- macros
+
+    private async Task LoadMacrosAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _macros = await db.Macros.AsNoTracking().Where(m => m.ServerId == null || m.ServerId == Id).OrderBy(m => m.SortOrder).ThenBy(m => m.Id).ToListAsync();
+    }
+
+    private async Task RunMacro(CommandMacro m)
+    {
+        if (m.Confirm)
+        {
+            _pending = m;
+            _confirmOpen = true;
+            return;
+        }
+        _stick = true;
+        await Connections.ExecuteAsync(Id, m.Command);
+    }
+
+    private async Task RunPending()
+    {
+        if (_pending is null) return;
+        _stick = true;
+        await Connections.ExecuteAsync(Id, _pending.Command);
+        _pending = null;
+    }
+
+    private async Task AddMacroAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.Macros.Add(new CommandMacro
+        {
+            Label = _newLabel.Trim(),
+            Command = _newCommand.Trim(),
+            ServerId = _newGlobal ? null : Id,
+            Confirm = _newConfirm,
+            SortOrder = _macros.Count,
+        });
+        await db.SaveChangesAsync();
+        _newLabel = _newCommand = "";
+        await LoadMacrosAsync();
+    }
+
+    private async Task DeleteMacroAsync(CommandMacro m)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.Macros.Where(x => x.Id == m.Id).ExecuteDeleteAsync();
+        await LoadMacrosAsync();
+    }
+
+    public override void Dispose()
+    {
+        Live.ConsoleLineAdded -= OnLine;
+        base.Dispose();
+    }
+}

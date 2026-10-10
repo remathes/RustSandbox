@@ -1,0 +1,38 @@
+@page "/login"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+
+<PageTitle>Sign in · Rust Sandbox</PageTitle>
+
+<div class="login">
+    <div class="login-card">
+        <div class="brand">
+            <BrandMark />
+            <div class="brand-name">Rust Sandbox<small>Sign in to manage your servers</small></div>
+        </div>
+        <form method="post" action="/account/login" class="panel">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <div class="panel-body">
+                @if (Error is not null)
+                {
+                    <div class="callout bad">That username and password don't match. Check Auth settings in appsettings.json.</div>
+                }
+                <label class="field">
+                    <span>Username</span>
+                    <input name="username" autocomplete="username" required autofocus />
+                </label>
+                <label class="field">
+                    <span>Password</span>
+                    <input name="password" type="password" autocomplete="current-password" required />
+                </label>
+                <button class="btn primary" type="submit">Sign in</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+}

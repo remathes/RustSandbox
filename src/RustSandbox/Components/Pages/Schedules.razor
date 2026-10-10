@@ -1,0 +1,314 @@
+@page "/s/{Id:int}/schedules"
+@inherits ServerPageBase
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject SchedulerService Scheduler
+
+<PageTitle>@(Server?.Name ?? "Server") · Schedules</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Schedules</h1>
+                <p>Automatic restarts, wipes, announcements and commands. Times use this machine's time zone (@TimeZoneInfo.Local.StandardName).</p>
+            </div>
+            <button class="btn primary" @onclick='() => Edit(new ScheduledTask { ServerId = Id, Name = "New task" })'><Icon Name="plus" /> New task</button>
+        </div>
+
+        <div class="grid @(_editing is null ? "" : "g-side")">
+            <section class="panel">
+                @if (_tasks.Count == 0)
+                {
+                    <div class="empty">
+                        <h3>No scheduled tasks</h3>
+                        <p>Start from a common setup:</p>
+                        <div class="row" style="justify-content:center">
+                            @foreach (var (label, make) in Presets)
+                            {
+                                <button class="btn" @onclick="() => Edit(make())">@label</button>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="panel-body flush table-wrap">
+                        <table class="table">
+                            <thead><tr><th style="width:52px">On</th><th>Task</th><th>Next run</th><th>Last run</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var t in _tasks)
+                                {
+                                    <tr>
+                                        <td><label class="check"><input type="checkbox" checked="@t.Enabled" @onchange="e => ToggleAsync(t, e)" aria-label="Enabled" /></label></td>
+                                        <td>
+                                            <b>@t.Name</b> <span class="badge @(IsDestructive(t.Action) ? "rust" : "")">@ActionLabel(t.Action)</span>
+                                            <div class="muted" style="font-size:13px">@SchedulerService.Describe(t)@(t.WarningMinutes > 0 && IsDestructive(t.Action) ? $" · {t.WarningMinutes} min warning" : "")</div>
+                                        </td>
+                                        <td class="nowrap">
+                                            @if (t.Enabled && t.NextRunUtc is { } next)
+                                            {
+                                                <span>@Fmt.Local(next, "ddd MMM d, HH:mm")</span>
+                                                <div class="muted" style="font-size:12.5px">in @Fmt.Duration(next - DateTime.UtcNow)</div>
+                                            }
+                                            else
+                                            {
+                                                <span class="muted">—</span>
+                                            }
+                                        </td>
+                                        <td class="nowrap">
+                                            @if (t.LastRunUtc is { } last)
+                                            {
+                                                <span>@Fmt.Ago(last)</span>
+                                                <div class="@(t.LastResult.StartsWith("Fail") || t.LastResult.Contains("not", StringComparison.OrdinalIgnoreCase) ? "bad" : "muted")" style="font-size:12.5px">@t.LastResult</div>
+                                            }
+                                            else
+                                            {
+                                                <span class="muted">Never</span>
+                                            }
+                                        </td>
+                                        <td class="r nowrap">
+                                            <button class="btn sm" @onclick="() => { _runNow = t; _runNowOpen = true; }">Run now</button>
+                                            <button class="btn sm ghost" @onclick="() => Edit(t)">Edit</button>
+                                            <button class="btn sm ghost" title="Delete" @onclick="() => DeleteAsync(t)"><Icon Name="trash" /></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="row" style="padding:12px 16px;border-top:1px solid var(--steel-750)">
+                        <span class="muted" style="font-size:13px">Add a preset:</span>
+                        @foreach (var (label, make) in Presets)
+                        {
+                            <button class="btn sm ghost" @onclick="() => Edit(make())">@label</button>
+                        }
+                    </div>
+                }
+            </section>
+
+            @if (_editing is not null)
+            {
+                var t = _editing;
+                <section class="panel">
+                    <div class="panel-head"><h2>@(t.Id == 0 ? "New task" : "Edit task")</h2><span class="spacer"></span><button class="btn sm ghost" @onclick="() => _editing = null">✕</button></div>
+                    <div class="panel-body stack" style="gap:14px">
+                        <label class="field"><span>Name</span><input class="input" @bind="t.Name" /></label>
+                        <label class="field">
+                            <span>What to do</span>
+                            <select @bind="t.Action">
+                                @foreach (var a in Enum.GetValues<ScheduleAction>())
+                                {
+                                    <option value="@a">@ActionLabel(a)</option>
+                                }
+                            </select>
+                            @if (NeedsLocal(t.Action) && !Server.Settings.ManageProcess)
+                            {
+                                <small class="warn">Needs “Run the server process on this machine” turned on in Settings → Hosting.</small>
+                            }
+                        </label>
+                        @if (t.Action is ScheduleAction.Command or ScheduleAction.Announce)
+                        {
+                            <label class="field">
+                                <span>@(t.Action == ScheduleAction.Command ? "Commands (one per line)" : "Message")</span>
+                                <textarea class="input @(t.Action == ScheduleAction.Command ? "mono" : "")" rows="3" @bind="t.Payload"></textarea>
+                            </label>
+                        }
+                        @if (t.Action == ScheduleAction.Restart)
+                        {
+                            <label class="field"><span>Reason shown to players</span><input class="input" @bind="t.Payload" placeholder="Scheduled restart" /></label>
+                        }
+                        <label class="field">
+                            <span>When</span>
+                            <select @bind="t.Kind">
+                                <option value="@ScheduleKind.Daily">Every day</option>
+                                <option value="@ScheduleKind.Weekly">Every week</option>
+                                <option value="@ScheduleKind.Interval">Every few minutes / hours</option>
+                                <option value="@ScheduleKind.FirstThursday">First Thursday of the month (forced wipe)</option>
+                                <option value="@ScheduleKind.Once">Once</option>
+                            </select>
+                        </label>
+                        @switch (t.Kind)
+                        {
+                            case ScheduleKind.Daily:
+                            case ScheduleKind.FirstThursday:
+                                <label class="field"><span>At</span><input class="input" type="time" @bind="TimeValue" /></label>
+                                break;
+                            case ScheduleKind.Weekly:
+                                <div class="grid g-2">
+                                    <label class="field">
+                                        <span>On</span>
+                                        <select @bind="t.DayOfWeek">
+                                            @foreach (var d in Enum.GetValues<DayOfWeek>())
+                                            {
+                                                <option value="@d">@d</option>
+                                            }
+                                        </select>
+                                    </label>
+                                    <label class="field"><span>At</span><input class="input" type="time" @bind="TimeValue" /></label>
+                                </div>
+                                break;
+                            case ScheduleKind.Interval:
+                                <label class="field"><span>Every (minutes)</span><input class="input" type="number" min="1" @bind="t.IntervalMinutes" /></label>
+                                break;
+                            case ScheduleKind.Once:
+                                <label class="field"><span>On</span><input class="input" type="datetime-local" @bind="OnceLocal" /></label>
+                                break;
+                        }
+                        @if (IsDestructive(t.Action))
+                        {
+                            <label class="field">
+                                <span>Warn players for (minutes)</span>
+                                <input class="input" type="number" min="0" max="60" @bind="t.WarningMinutes" />
+                                <small>The countdown starts early so the @ActionLabel(t.Action).ToLowerInvariant() happens on time.</small>
+                            </label>
+                        }
+                        @if (t.Action is ScheduleAction.MapWipe or ScheduleAction.FullWipe)
+                        {
+                            <label class="check"><input type="checkbox" @bind="t.NewSeedOnWipe" /><span><b>Roll a new random map seed</b><small>Map size stays the same.</small></span></label>
+                        }
+                        <div class="callout">@SchedulerService.Describe(t)</div>
+                        <div class="row end">
+                            <button class="btn ghost" @onclick="() => _editing = null">Cancel</button>
+                            <button class="btn primary" @onclick="SaveAsync">Save task</button>
+                        </div>
+                    </div>
+                </section>
+            }
+        </div>
+    </div>
+
+    <ConfirmDialog @bind-Visible="_runNowOpen" Title="@($"Run “{_runNow?.Name}” now?")"
+                   ConfirmText="Run now" Danger="@(_runNow is not null && IsDestructive(_runNow.Action))" OnConfirm="RunNowAsync"
+                   RequireText="@(_runNow is not null && _runNow.Action is ScheduleAction.MapWipe or ScheduleAction.FullWipe ? Server.Name : null)">
+        <p>@(_runNow is null ? "" : $"{ActionLabel(_runNow.Action)}{(IsDestructive(_runNow.Action) && _runNow.WarningMinutes > 0 ? $" after a {_runNow.WarningMinutes}-minute in-game countdown" : "")}.")</p>
+    </ConfirmDialog>
+}
+
+@code {
+    private List<ScheduledTask> _tasks = new();
+    private ScheduledTask? _editing;
+    private ScheduledTask? _runNow;
+    private bool _runNowOpen;
+
+    private (string, Func<ScheduledTask>)[] Presets => new (string, Func<ScheduledTask>)[]
+    {
+        ("Daily restart at 6:00", () => new ScheduledTask { ServerId = Id, Name = "Daily restart", Action = ScheduleAction.Restart, Kind = ScheduleKind.Daily, TimeOfDayMinutes = 6 * 60, WarningMinutes = 10 }),
+        ("Forced wipe day", () => new ScheduledTask { ServerId = Id, Name = "Forced wipe", Action = ScheduleAction.MapWipe, Kind = ScheduleKind.FirstThursday, TimeOfDayMinutes = 13 * 60, WarningMinutes = 15, NewSeedOnWipe = true }),
+        ("Save every 15 min", () => new ScheduledTask { ServerId = Id, Name = "Extra save", Action = ScheduleAction.Save, Kind = ScheduleKind.Interval, IntervalMinutes = 15 }),
+        ("Hourly announcement", () => new ScheduledTask { ServerId = Id, Name = "Discord link", Action = ScheduleAction.Announce, Kind = ScheduleKind.Interval, IntervalMinutes = 60, Payload = "Join our Discord: discord.gg/your-invite" }),
+        ("Weekly update check", () => new ScheduledTask { ServerId = Id, Name = "Update server", Action = ScheduleAction.UpdateServer, Kind = ScheduleKind.Weekly, DayOfWeek = DayOfWeek.Thursday, TimeOfDayMinutes = 19 * 60 + 30, WarningMinutes = 5 }),
+    };
+
+    private TimeOnly TimeValue
+    {
+        get => _editing is null ? new TimeOnly(6, 0) : TimeOnly.FromTimeSpan(TimeSpan.FromMinutes(_editing.TimeOfDayMinutes));
+        set { if (_editing is not null) _editing.TimeOfDayMinutes = value.Hour * 60 + value.Minute; }
+    }
+
+    private DateTime OnceLocal
+    {
+        get => _editing?.OnceAtUtc is { } u ? TimeZoneInfo.ConvertTimeFromUtc(u, TimeZoneInfo.Local) : DateTime.Now.AddHours(1);
+        set { if (_editing is not null) _editing.OnceAtUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(value, DateTimeKind.Unspecified), TimeZoneInfo.Local); }
+    }
+
+    protected override async Task OnServerChangedAsync()
+    {
+        _editing = null;
+        await LoadAsync();
+    }
+
+    protected override async Task OnLiveRefreshAsync()
+    {
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tasks = await db.Schedules.AsNoTracking().Where(t => t.ServerId == Id).OrderBy(t => t.Id).ToListAsync();
+    }
+
+    private static bool IsDestructive(ScheduleAction a) => a is ScheduleAction.Restart or ScheduleAction.MapWipe or ScheduleAction.FullWipe or ScheduleAction.UpdateServer;
+    private static bool NeedsLocal(ScheduleAction a) => a is ScheduleAction.MapWipe or ScheduleAction.FullWipe or ScheduleAction.UpdateServer;
+
+    public static string ActionLabel(ScheduleAction a) => a switch
+    {
+        ScheduleAction.Restart => "Restart",
+        ScheduleAction.Command => "Run commands",
+        ScheduleAction.Announce => "Announce in chat",
+        ScheduleAction.Save => "Save world",
+        ScheduleAction.UpdateServer => "Update server",
+        ScheduleAction.MapWipe => "Map wipe",
+        ScheduleAction.FullWipe => "Full wipe (map + blueprints)",
+        _ => a.ToString(),
+    };
+
+    private void Edit(ScheduledTask t)
+    {
+        // Edit a copy so Cancel discards changes.
+        _editing = new ScheduledTask
+        {
+            Id = t.Id, ServerId = Id, Name = t.Name, Enabled = t.Enabled, Kind = t.Kind, Action = t.Action,
+            TimeOfDayMinutes = t.TimeOfDayMinutes, DayOfWeek = t.DayOfWeek, IntervalMinutes = t.IntervalMinutes, OnceAtUtc = t.OnceAtUtc,
+            Payload = t.Payload, WarningMinutes = t.WarningMinutes, NewSeedOnWipe = t.NewSeedOnWipe, LastRunUtc = t.LastRunUtc, LastResult = t.LastResult,
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        var t = _editing!;
+        if (string.IsNullOrWhiteSpace(t.Name)) { Toasts.Error("Give the task a name."); return; }
+        if (t.Kind == ScheduleKind.Interval && t.IntervalMinutes < 1) { Toasts.Error("The interval must be at least 1 minute."); return; }
+        t.NextRunUtc = SchedulerService.ComputeNext(t, DateTime.UtcNow);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (t.Id == 0) db.Schedules.Add(t);
+        else db.Schedules.Update(t);
+        await db.SaveChangesAsync();
+        _editing = null;
+        Toasts.Success(t.NextRunUtc is { } n ? $"Saved. Next run {Fmt.Local(n, "ddd MMM d, HH:mm")}." : "Saved.");
+        await LoadAsync();
+    }
+
+    private async Task ToggleAsync(ScheduledTask t, ChangeEventArgs e)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var row = await db.Schedules.FindAsync(t.Id);
+        if (row is null) return;
+        row.Enabled = e.Value is true || (e.Value is string s && bool.TryParse(s, out var b) && b);
+        row.NextRunUtc = row.Enabled ? SchedulerService.ComputeNext(row, DateTime.UtcNow) : null;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync(ScheduledTask t)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        await db.Schedules.Where(x => x.Id == t.Id).ExecuteDeleteAsync();
+        if (_editing?.Id == t.Id) _editing = null;
+        Toasts.Show($"Deleted “{t.Name}”.");
+        await LoadAsync();
+    }
+
+    private Task RunNowAsync()
+    {
+        var t = _runNow;
+        _runNow = null;
+        if (t is null || Server is null) return Task.CompletedTask;
+        var server = Server;
+        Toasts.Show($"Running “{t.Name}”…");
+        _ = Task.Run(async () =>
+        {
+            string? err;
+            try { err = await Scheduler.RunTaskAsync(t, server); }
+            catch (Exception ex) { err = ex.Message; }
+            await InvokeAsync(() =>
+            {
+                if (err is null) Toasts.Success($"“{t.Name}” finished.");
+                else Toasts.Error($"“{t.Name}”: {err}");
+            });
+        });
+        return Task.CompletedTask;
+    }
+}

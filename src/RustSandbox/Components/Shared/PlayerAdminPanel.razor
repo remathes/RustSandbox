@@ -1,0 +1,147 @@
+@* Admin actions for one player: groups, role, mute, kick, ban. Works whether or not they're online. *@
+@inject PermissionService Perms
+@inject ServerConnectionManager Conn
+@inject ToastService Toasts
+
+<div class="panel inset" style="padding:12px 14px;margin-bottom:var(--gap)">
+    <div class="row" style="margin-bottom:10px">
+        <h3>Admin</h3>
+        <span class="spacer" style="flex:1"></span>
+        @if (Online)
+        {
+            <span class="badge good">online</span>
+        }
+        else
+        {
+            <span class="badge">offline</span>
+        }
+    </div>
+
+    <dl class="kv" style="margin-bottom:12px">
+        <dt>Groups</dt>
+        <dd>
+            @if (_user is null)
+            {
+                <span class="muted">@(Conn.Get(Server.Id).IsOnline ? "Loading…" : "Server offline")</span>
+            }
+            else
+            {
+                <span>@(string.Join(", ", _user.Groups.DefaultIfEmpty("default")))</span>
+            }
+            <a href="s/@Server.Id/permissions?player=@SteamId" style="margin-left:8px">Edit groups &amp; permissions</a>
+        </dd>
+        @if (_role is not null)
+        {
+            <dt>Role</dt>
+            <dd>@_role</dd>
+        }
+    </dl>
+
+    <div class="row">
+        @if (Online)
+        {
+            <button class="btn sm" @onclick="() => _kickOpen = true">Kick</button>
+        }
+        <button class="btn sm danger" @onclick="() => _banOpen = true">Ban</button>
+        <button class="btn sm" @onclick="() => MuteAsync(true)">Mute chat</button>
+        <button class="btn sm ghost" @onclick="() => MuteAsync(false)">Unmute</button>
+        <select class="input" style="width:auto;min-height:28px;padding:2px 8px;font-size:13px" @bind="_newRole" aria-label="Role">
+            <option value="">Change role…</option>
+            <option value="moderator">Make moderator</option>
+            <option value="owner">Make owner</option>
+            <option value="none">Remove admin role</option>
+        </select>
+        @if (!string.IsNullOrEmpty(_newRole))
+        {
+            <button class="btn sm primary" @onclick="() => _roleOpen = true">Apply</button>
+        }
+    </div>
+</div>
+
+<ConfirmDialog @bind-Visible="_kickOpen" Title="@($"Kick {Name}?")" ConfirmText="Kick" Danger="true" OnConfirm="KickAsync">
+    <label class="field"><span>Reason shown to the player</span><input class="input" @bind="_reason" /></label>
+</ConfirmDialog>
+
+<ConfirmDialog @bind-Visible="_banOpen" Title="@($"Ban {Name}?")" ConfirmText="Ban player" Danger="true" OnConfirm="BanAsync">
+    <p>Works even if they're offline. They're kicked if they're on.</p>
+    <div class="form-grid" style="margin-top:10px">
+        <label class="field"><span>Reason</span><input class="input" @bind="_reason" /></label>
+        <label class="field">
+            <span>Length</span>
+            <select @bind="_duration">
+                <option value="">Permanent</option>
+                <option value="1h">1 hour</option>
+                <option value="1d">1 day</option>
+                <option value="3d">3 days</option>
+                <option value="7d">7 days</option>
+                <option value="30d">30 days</option>
+            </select>
+        </label>
+    </div>
+</ConfirmDialog>
+
+<ConfirmDialog @bind-Visible="_roleOpen" Title="Change admin role?" ConfirmText="Apply" Danger="@(_newRole == "owner")" OnConfirm="RoleAsync">
+    <p>@RoleText</p>
+</ConfirmDialog>
+
+@code {
+    [Parameter, EditorRequired] public ServerInstance Server { get; set; } = default!;
+    [Parameter, EditorRequired] public string SteamId { get; set; } = "";
+    [Parameter] public string Name { get; set; } = "";
+
+    private UserPerms? _user;
+    private string? _role;
+    private string _reason = "Breaking server rules", _duration = "", _newRole = "";
+    private bool _kickOpen, _banOpen, _roleOpen;
+    private string? _loaded;
+
+    private bool Online => Conn.Get(Server.Id).Players.Any(p => p.SteamId == SteamId);
+
+    private string RoleText => _newRole switch
+    {
+        "owner" => $"{Name} gets owner (auth level 2): full admin commands in game. Takes effect next time they connect.",
+        "moderator" => $"{Name} gets moderator (auth level 1): kick, ban and most admin commands. Takes effect next time they connect.",
+        _ => $"Removes moderator and owner from {Name}.",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded == SteamId) return;
+        _loaded = SteamId;
+        _user = null;
+        _role = PermissionService.ReadStaff(Server)?.FirstOrDefault(x => x.SteamId == SteamId)?.Role
+                ?? (Server.Settings.ManageProcess ? "Player" : null);
+        if (Conn.Get(Server.Id).IsOnline && (Server.Settings.Framework != ModFramework.Vanilla || Server.IsDemo))
+        {
+            try { _user = await Perms.UserAsync(Server, SteamId); } catch { /* shown as unavailable */ }
+        }
+    }
+
+    private async Task Result(Task<string?> task, string success)
+    {
+        string? err;
+        try { err = await task; }
+        catch (Exception ex) { err = ex.Message; }
+        Toasts.Result(err, success);
+    }
+
+    private async Task KickAsync()
+    {
+        await Conn.ExecuteAsync(Server.Id, $"kick {SteamId} " + Fmt.Quote(_reason));
+        Toasts.Success($"Kicked {Name}.");
+    }
+
+    private Task BanAsync() => Result(Perms.BanAsync(Server, SteamId, Name, _reason, _duration),
+        string.IsNullOrEmpty(_duration) ? $"Banned {Name}." : $"Banned {Name} for {_duration}.");
+
+    private Task MuteAsync(bool mute) => Result(Perms.MuteAsync(Server, SteamId, mute), mute ? $"Muted {Name}." : $"Unmuted {Name}.");
+
+    private async Task RoleAsync()
+    {
+        var role = _newRole;
+        _newRole = "";
+        await Result(Perms.SetRoleAsync(Server, SteamId, Name, role), role == "none" ? "Admin role removed." : $"{Name} is now {role}.");
+        _loaded = null;
+        await OnParametersSetAsync();
+    }
+}
