@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (2026-10-11)
+## 1.2.0 (2026-10-11)
 
 ### New
 - **Loot** page and `RustSandboxLoot` plugin 1.1.0. Every crate, barrel and NPC body is listed with Rust's own items and the real chance of each one, worked out from the game's loot tables. For each one you can keep Rust's loot (the default), replace it with your own list, or add to it. Each item has an amount range, a chance %, and a blueprint option. Also:
@@ -19,6 +19,11 @@
 ### Fixed
 - Smelting gave 1 sulfur (and other outputs) per ore when the smelting settings were changed (Tweaks 1.4.1).
 - The "Tool Time" starter quest rewarded `salvaged.axe`, which doesn't exist. It now gives `axe.salvaged`, and existing configs are corrected.
+
+## 1.1.0 (2026-10-10)
+
+### New
+- **Repair Recycler** (`RustSandboxRecycler` plugin): a single deployable item that places a recycler with a repair bench built in. It can be crafted with `/recycler craft` or given by admins.
 
 ## 1.0.0 (2026-10-10)
 
