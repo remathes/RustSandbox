@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Tweaks", "RustSandbox", "1.4.0")]
+    [Info("Rust Sandbox Tweaks", "RustSandbox", "1.4.1")]
     [Description("Gather rates, stack sizes, smelting, inventory sorting and furnace auto-split controlled from Rust Sandbox.")]
     public class RustSandboxTweaks : RustPlugin
     {
@@ -177,8 +177,7 @@ namespace Oxide.Plugins
             foreach (var c in _defaultCook)
             {
                 if (c.Mod == null) continue;
-                c.Mod.cookTime = c.CookTime;
-                c.Mod.amountOfBecome = c.Amount;
+                SetCook(c, c.CookTime, c.Amount);
             }
             _applied = false;
         }
@@ -221,13 +220,27 @@ namespace Oxide.Plugins
                 if (c.CookTime <= 0) continue;
                 if (IsSmeltable(c.Def))
                 {
-                    c.Mod.cookTime = (float)Math.Max(0.05, c.CookTime / Math.Max(0.01, _cfg.SmeltSpeed));
-                    c.Mod.amountOfBecome = (float)Math.Max(1, Math.Round(c.Amount * _cfg.SmeltOutput));
+                    SetCook(c, (float)Math.Max(0.05, c.CookTime / Math.Max(0.01, _cfg.SmeltSpeed)),
+                                (float)Math.Max(1, Math.Round(c.Amount * _cfg.SmeltOutput)));
                 }
                 else if (c.Def.category == ItemCategory.Food)
                 {
-                    c.Mod.cookTime = (float)Math.Max(0.05, c.CookTime / Math.Max(0.01, _cfg.CookSpeed));
+                    SetCook(c, (float)Math.Max(0.05, c.CookTime / Math.Max(0.01, _cfg.CookSpeed)), c.Amount);
                 }
+            }
+        }
+
+        // Ovens read a copy of the cooking settings (ItemDefinition.ItemModCookable, a CookableItemInfo made at startup),
+        // not the ItemModCookable component itself, so both have to change.
+        private static void SetCook(CookDefault c, float cookTime, float amount)
+        {
+            c.Mod.cookTime = cookTime;
+            c.Mod.amountOfBecome = amount;
+            var info = c.Def.ItemModCookable;
+            if (info != null)
+            {
+                info.cookTime = cookTime;
+                info.amountOfBecome = amount;
             }
         }
 

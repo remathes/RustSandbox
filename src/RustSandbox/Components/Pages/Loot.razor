@@ -1,0 +1,462 @@
+@page "/s/{Id:int}/loot"
+@inherits ServerPageBase
+@inject LootService LootApi
+@inject TweaksService Tweaks
+@using System.Globalization
+
+<PageTitle>@(Server?.Name ?? "Server") · Loot</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Loot</h1>
+                <p>See what Rust puts in every crate, barrel and NPC body, and the chance of each item. Leave one on Rust's own loot, or give it your own list: each item has an amount and a chance to show up.</p>
+            </div>
+            @if (_vanilla is not null)
+            {
+                <span class="badge good">Plugin v@(_vanilla.Version)</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="() => LoadAsync(true)" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (_vanilla is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">
+                @if (Runtime.IsOnline)
+                {
+                    <span>The Loot plugin didn't answer, so Rust's own tables can't be shown. Install it from <a href="s/@Id/telemetry">Telemetry → Loot</a>, then refresh.</span>
+                }
+                else
+                {
+                    <span>Rust's own loot tables show up once the server has run with the Loot plugin (install it from <a href="s/@Id/telemetry">Telemetry → Loot</a>). You can still set up custom loot now.</span>
+                }
+            </div>
+        }
+        else if (_vanilla is not null && !_live)
+        {
+            <div class="callout" style="margin-bottom:var(--gap)">The server is off, so these are Rust's tables from the last time it ran.</div>
+        }
+
+        @if (_configError is not null)
+        {
+            <div class="callout warn">@_configError</div>
+        }
+        else if (_config is not null)
+        {
+            <div class="row" style="margin-bottom:var(--gap);flex-wrap:wrap">
+                <p class="muted" style="margin:0;flex:1">Saving reloads the plugin. Crates pick up changes as they refill.</p>
+                @if (Runtime.IsOnline)
+                {
+                    <button class="btn" title="Re-roll the loot in every crate and barrel on the map now (crates someone has open and locked crates are left alone)" @onclick="() => RefillAsync(null)" disabled="@(_busy || _dirty)">Refill crates on the map</button>
+                }
+                @if (_dirty)
+                {
+                    <button class="btn ghost" @onclick="() => LoadAsync(false)" disabled="@_busy">Discard</button>
+                }
+                <button class="btn primary" @onclick="SaveAsync" disabled="@(_busy || !_dirty)"><Icon Name="save" /> Save &amp; reload</button>
+            </div>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Settings</h2></div>
+                <div class="panel-body form-grid">
+                    <label class="check wide">
+                        <input type="checkbox" checked="@_config.Enabled" @onchange="e => { _config.Enabled = e.Value is true; _dirty = true; }" />
+                        <span><b>Use the Loot plugin</b><small>Off: everything below is ignored and Rust's own loot is used everywhere.</small></span>
+                    </label>
+                    <label class="field">
+                        <span>Loot multiplier <span class="muted">(1 = Rust's amounts)</span></span>
+                        <input class="input" type="number" min="0.1" max="100" step="0.1" value="@F(_config.LootMultiplier)" @onchange="e => { _config.LootMultiplier = (float)Num(e, _config.LootMultiplier, 0.1); _dirty = true; }" />
+                        <small class="muted">Multiplies stacks (ammo, resources, components, scrap…) in every crate and NPC body. Weapons and other single items stay one.</small>
+                    </label>
+                    <label class="field">
+                        <span>Patrol Heli crates <span class="muted">(blank = Rust's@(_vanilla?.HeliCrates >= 0 ? $": {_vanilla.HeliCrates}" : ""))</span></span>
+                        <input class="input" type="number" min="0" max="20" step="1" value="@(_config.HeliCrates >= 0 ? _config.HeliCrates.ToString(CultureInfo.InvariantCulture) : "")" placeholder="@(_vanilla?.HeliCrates >= 0 ? _vanilla.HeliCrates.ToString(CultureInfo.InvariantCulture) : "Rust's")" @onchange="e => { _config.HeliCrates = Opt(e); _dirty = true; }" />
+                    </label>
+                    <label class="field">
+                        <span>Bradley crates <span class="muted">(blank = Rust's@(_vanilla?.BradleyCrates >= 0 ? $": {_vanilla.BradleyCrates}" : ""))</span></span>
+                        <input class="input" type="number" min="0" max="20" step="1" value="@(_config.BradleyCrates >= 0 ? _config.BradleyCrates.ToString(CultureInfo.InvariantCulture) : "")" placeholder="@(_vanilla?.BradleyCrates >= 0 ? _vanilla.BradleyCrates.ToString(CultureInfo.InvariantCulture) : "Rust's")" @onchange="e => { _config.BradleyCrates = Opt(e); _dirty = true; }" />
+                    </label>
+                    <label class="check wide">
+                        <input type="checkbox" checked="@_config.KeepScrap" @onchange="e => { _config.KeepScrap = e.Value is true; _dirty = true; }" />
+                        <span><b>Keep Rust's scrap in replaced crates</b><small>Rust adds scrap to most crates on top of the loot table. A crate's own scrap setting below wins.</small></span>
+                    </label>
+                </div>
+            </section>
+
+            <div class="grid" style="grid-template-columns:minmax(220px,290px) minmax(0,1fr);align-items:start">
+                <section class="panel">
+                    <div class="panel-head"><input class="input" style="width:100%" placeholder="Search crates" @bind="_search" @bind:event="oninput" /></div>
+                    <div class="panel-body" style="padding:6px;max-height:70vh;overflow:auto">
+                        @{ string? lastKind = null; }
+                        @foreach (var c in CrateList())
+                        {
+                            var crate = c;
+                            var mode = ModeOf(crate.Id);
+                            if (crate.Kind != lastKind)
+                            {
+                                lastKind = crate.Kind;
+                                <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:8px 6px 4px">@(crate.Kind == "npc" ? "NPC bodies" : "Crates & barrels")</div>
+                            }
+                            <button class="btn ghost" style="display:flex;width:100%;justify-content:space-between;gap:8px;text-align:left;margin-bottom:2px;@(_selected == crate.Id ? "background:var(--steel-700)" : "")" @onclick="() => _selected = crate.Id">
+                                <span>@crate.Name<br /><span class="muted" style="font-size:11px">@crate.Id@(crate.OnMap > 0 ? $" · {crate.OnMap} on map" : "")</span></span>
+                                @if (mode != "Vanilla")
+                                {
+                                    <span class="badge @(mode == "Replace" ? "rust" : "good")">@ModeLabelShort(mode)</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                </section>
+
+                @if (Selected() is { } sel)
+                {
+                    var cfg = CrateConfig(sel.Id);
+                    var vcrate = _vanilla?.Crates.FirstOrDefault(c => c.Id == sel.Id);
+                    <div>
+                        <section class="panel">
+                            <div class="panel-head">
+                                <h2>@sel.Name <span class="muted" style="font-size:13px;font-weight:400">@sel.Id</span></h2>
+                                <span class="spacer"></span>
+                                @if (Runtime.IsOnline && sel.OnMap > 0)
+                                {
+                                    <button class="btn sm" title="Re-roll the loot in this crate type on the map now" @onclick="() => RefillAsync(sel.Id)" disabled="@(_busy || _dirty)">Refill these now</button>
+                                }
+                            </div>
+                            <div class="panel-body">
+                                <div class="seg" style="margin-bottom:10px">
+                                    @foreach (var m in Modes)
+                                    {
+                                        var mm = m;
+                                        <button class="@(cfg?.Mode == mm || (cfg is null && mm == "Vanilla") ? "on" : "")" @onclick="() => SetMode(sel, vcrate, mm)">@ModeLabel(mm)</button>
+                                    }
+                                </div>
+                                <p class="help" style="margin:0">@ModeHelp(cfg?.Mode ?? "Vanilla")</p>
+                                @if (sel.Kind != "npc")
+                                {
+                                    <label class="field" style="margin-top:12px;max-width:260px">
+                                        <span>Scrap in each crate <span class="muted">(blank = Rust's@(vcrate is not null ? $": {vcrate.Scrap}" : ""))</span></span>
+                                        <input class="input" type="number" min="0" max="10000" step="1" value="@(cfg is { Scrap: >= 0 } ? cfg.Scrap.ToString(CultureInfo.InvariantCulture) : "")" placeholder="@(vcrate?.Scrap.ToString(CultureInfo.InvariantCulture) ?? "Rust's")" @onchange="e => SetScrap(sel.Id, Opt(e))" />
+                                    </label>
+                                }
+                            </div>
+                        </section>
+
+                        @if (cfg is not null && cfg.Mode != "Vanilla")
+                        {
+                            var expected = cfg.Items.Sum(i => i.Chance) / 100;
+                            <section class="panel mt">
+                                <div class="panel-head">
+                                    <h2>@(cfg.Mode == "Replace" ? "Your loot table" : "Extra loot")</h2>
+                                    <span class="spacer"></span>
+                                    @if (vcrate is not null)
+                                    {
+                                        <button class="btn sm ghost" title="Start over from Rust's list for this crate, with the same chances" @onclick="() => CopyVanilla(sel.Id, vcrate, cfg.Mode)">Copy Rust's list</button>
+                                    }
+                                    @if (cfg.Items.Count > 0)
+                                    {
+                                        <button class="btn sm ghost" @onclick="() => { cfg.Items.Clear(); _dirty = true; }">Clear list</button>
+                                    }
+                                </div>
+                                <div class="panel-body">
+                                    <div class="form-grid" style="margin-bottom:12px">
+                                        <label class="field">
+                                            <span>Fewest items per crate</span>
+                                            <input class="input" type="number" min="0" max="48" step="1" value="@cfg.MinItems" @onchange="e => { cfg.MinItems = Int(e, cfg.MinItems, 0); _dirty = true; }" />
+                                        </label>
+                                        <label class="field">
+                                            <span>Most items per crate</span>
+                                            <input class="input" type="number" min="1" max="48" step="1" value="@cfg.MaxItems" @onchange="e => { cfg.MaxItems = Int(e, cfg.MaxItems, 1); _dirty = true; }" />
+                                        </label>
+                                    </div>
+                                    <p class="help" style="margin-top:0">Each item rolls its own chance every time the crate fills, so 100% always shows up and 5% shows up about one crate in twenty. If fewer than the fewest come up, likelier items are added; if more than the most, some are dropped. With these chances a crate holds about <b>@F(Math.Clamp(expected, cfg.MinItems, Math.Max(cfg.MinItems, cfg.MaxItems)))</b> items@(sel.Slots > 0 ? $" (it has {sel.Slots} slots)" : "").</p>
+                                    <div class="table-wrap">
+                                        <table class="table">
+                                            <thead><tr><th>Item</th><th style="width:90px">Min</th><th style="width:90px">Max</th><th style="width:110px">Chance %</th><th style="width:90px" title="Spawn the blueprint instead of the item">Blueprint</th><th style="width:44px"></th></tr></thead>
+                                            <tbody>
+                                                @foreach (var it in cfg.Items)
+                                                {
+                                                    var item = it;
+                                                    <tr>
+                                                        <td>
+                                                            <span class="item-cell">
+                                                                <img class="item-icon" src="api/servers/@Id/item-icon/@item.Item" alt="" width="32" height="32" loading="lazy" onerror="this.style.visibility='hidden'" />
+                                                                <span>@NameOf(item.Item) <span class="muted" style="font-size:12px">@item.Item</span>@if (!Known(item.Item)) {<span class="badge warn" style="margin-left:6px">unknown item</span>}</span>
+                                                            </span>
+                                                        </td>
+                                                        <td><input class="input" type="number" min="1" step="1" value="@item.Min" @onchange="e => { item.Min = Int(e, item.Min, 1); if (item.Max < item.Min) item.Max = item.Min; _dirty = true; }" /></td>
+                                                        <td><input class="input" type="number" min="1" step="1" value="@item.Max" @onchange="e => { item.Max = Math.Max(item.Min, Int(e, item.Max, 1)); _dirty = true; }" /></td>
+                                                        <td><input class="input" type="number" min="0" max="100" step="0.1" value="@F(item.Chance)" @onchange="e => { item.Chance = Pct(e, item.Chance); _dirty = true; }" /></td>
+                                                        <td style="text-align:center"><input type="checkbox" checked="@item.Blueprint" @onchange="e => { item.Blueprint = e.Value is true; _dirty = true; }" /></td>
+                                                        <td><button class="btn sm ghost" title="Remove" @onclick="() => { cfg.Items.Remove(item); _dirty = true; }"><Icon Name="trash" /></button></td>
+                                                    </tr>
+                                                }
+                                                <tr>
+                                                    <td colspan="6">
+                                                        <div class="row" style="gap:6px;flex-wrap:wrap">
+                                                            <input class="input" style="width:260px" list="loot-items" placeholder="Add an item: type a name or shortname" @bind="_newItem" />
+                                                            <button class="btn sm" @onclick="() => AddItem(cfg, _newItem)">Add</button>
+                                                            <button class="btn sm primary" title="Pick from pictures of every item" @onclick="() => _galleryOpen = true">Browse items</button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </section>
+                        }
+
+                        <section class="panel mt">
+                            <div class="panel-head">
+                                <h2>Rust's own loot</h2>
+                                <span class="spacer"></span>
+                                @if (vcrate is not null)
+                                {
+                                    <span class="muted" style="font-size:12px">@vcrate.Items.Count items@(vcrate.Scrap > 0 ? $" · plus {vcrate.Scrap} scrap" : "")</span>
+                                }
+                            </div>
+                            <div class="panel-body">
+                                @if (vcrate is null)
+                                {
+                                    <div class="empty">@(_vanilla is null ? "Rust's table for this crate shows up once the server runs with the Loot plugin." : "This crate isn't in Rust's tables on this server.")</div>
+                                }
+                                else
+                                {
+                                    <p class="help" style="margin-top:0">Worked out from the game's own loot tables on this server. Chance is how often one crate holds at least one of the item. Rust picks from weighted groups (for example "a weapon" or "some components"), so the chances don't add up to a set number of items.</p>
+                                    <div class="table-wrap">
+                                        <table class="table">
+                                            <thead><tr><th>Item</th><th style="width:110px">Amount</th><th style="width:170px">Chance</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var v in vcrate.Items)
+                                                {
+                                                    <tr>
+                                                        <td>
+                                                            <span class="item-cell">
+                                                                <img class="item-icon" src="api/servers/@Id/item-icon/@v.Short" alt="" width="32" height="32" loading="lazy" onerror="this.style.visibility='hidden'" />
+                                                                <span>@v.Name@if (v.Blueprint) {<span class="badge" style="margin-left:6px">blueprint</span>} <span class="muted" style="font-size:12px">@v.Short</span></span>
+                                                            </span>
+                                                        </td>
+                                                        <td>@(v.Min == v.Max ? v.Min.ToString(CultureInfo.InvariantCulture) : $"{v.Min}–{v.Max}")</td>
+                                                        <td>
+                                                            <div class="row" style="gap:8px">
+                                                                <div class="bar-track" style="flex:1;height:6px"><div class="bar-fill" style="width:@(Math.Clamp(v.Chance * 100, 1, 100).ToString("0.#", CultureInfo.InvariantCulture))%"></div></div>
+                                                                <span class="num" style="min-width:52px;text-align:right">@Pct(v.Chance)</span>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                            </div>
+                        </section>
+                    </div>
+                }
+                else
+                {
+                    <div class="empty">Pick a crate.</div>
+                }
+            </div>
+
+            <datalist id="loot-items">
+                @foreach (var i in _items)
+                {
+                    <option value="@i.Short">@i.Name</option>
+                }
+            </datalist>
+        }
+    </div>
+
+    <ItemGallery Visible="@_galleryOpen" VisibleChanged="v => _galleryOpen = v" ServerId="@Id" Items="@_items"
+                 Title="Add to this crate" OnPick="s => { if (_selected is { } id && _config is not null && _config.Crates.TryGetValue(id, out var c)) AddItem(c, s); }" />
+}
+
+@code {
+    private sealed record CrateRow(string Id, string Name, int OnMap, int Slots, string Kind);
+
+    private static readonly string[] Modes = { "Vanilla", "Replace", "Add" };
+
+    private bool _busy, _loaded, _live, _dirty, _galleryOpen;
+    private VanillaLoot? _vanilla;
+    private LootConfig? _config;
+    private string? _configError;
+    private string? _selected;
+    private string _search = "";
+    private string _newItem = "";
+    private List<RustItem> _items = new();
+    private Dictionary<string, RustItem> _itemsByShort = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnServerChangedAsync()
+    {
+        await LoadAsync(false);
+        if (Server is not null)
+        {
+            (_items, _) = await Tweaks.GetItemsAsync(Server);
+            _itemsByShort = _items.GroupBy(i => i.Short, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private async Task LoadAsync(bool refresh)
+    {
+        if (Server is null) return;
+        _busy = true;
+        try
+        {
+            (_vanilla, _live) = await LootApi.VanillaAsync(Server, refresh);
+            (_config, _configError) = await LootService.ReadConfigAsync(Server);
+            if (_config is not null)
+                foreach (var c in _config.Crates.Values)
+                    c.Mode = Modes.FirstOrDefault(m => string.Equals(m, c.Mode, StringComparison.OrdinalIgnoreCase)) ?? "Vanilla";
+            _dirty = false;
+            _loaded = true;
+            _selected ??= CrateList().FirstOrDefault()?.Id;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Server is null || _config is null) return;
+        _busy = true;
+        try
+        {
+            var err = await LootApi.SaveConfigAsync(Server, _config);
+            if (err is not null) { Toasts.Error(err); return; }
+            Toasts.Success(Runtime.IsOnline ? "Saved. Crates use it as they refill; press Refill crates on the map to see it now." : "Saved. It applies the next time the server starts.");
+        }
+        finally { _busy = false; }
+        await LoadAsync(false);
+    }
+
+    private async Task RefillAsync(string? crate)
+    {
+        _busy = true;
+        try
+        {
+            var reply = await LootApi.RefillAsync(Id, crate);
+            if (reply is null) Toasts.Error("The server didn't answer.");
+            else Toasts.Show(reply.Trim().Length > 0 ? reply.Trim() : "Done.");
+        }
+        finally { _busy = false; }
+    }
+
+    private IEnumerable<CrateRow> CrateList()
+    {
+        var rows = new Dictionary<string, CrateRow>();
+        if (_vanilla is not null)
+            foreach (var c in _vanilla.Crates) rows[c.Id] = new CrateRow(c.Id, c.Name, c.OnMap, c.Slots, c.Kind);
+        else
+            foreach (var (id, name) in LootService.CommonCrates) rows[id] = new CrateRow(id, name, 0, 0, LootService.IsNpc(id) ? "npc" : "crate");
+        if (_config is not null)
+            foreach (var id in _config.Crates.Keys.Where(k => !rows.ContainsKey(k))) rows[id] = new CrateRow(id, id, 0, 0, LootService.IsNpc(id) ? "npc" : "crate");
+        var q = _search.Trim();
+        return rows.Values
+            .Where(r => q.Length == 0 || r.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || r.Id.Contains(q, StringComparison.OrdinalIgnoreCase)
+                        || (_vanilla?.Crates.FirstOrDefault(c => c.Id == r.Id)?.Items.Any(i => i.Name.Contains(q, StringComparison.OrdinalIgnoreCase)) ?? false))
+            // Crates before NPCs; in each, customised ones first, then the ones on this map, then the rest.
+            .OrderBy(r => r.Kind == "npc" ? 1 : 0).ThenBy(r => ModeOf(r.Id) == "Vanilla" ? 1 : 0).ThenBy(r => r.OnMap > 0 ? 0 : 1).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private CrateRow? Selected() => _selected is null ? null : CrateList().FirstOrDefault(r => r.Id == _selected)
+        ?? (_vanilla?.Crates.FirstOrDefault(c => c.Id == _selected) is { } v ? new CrateRow(v.Id, v.Name, v.OnMap, v.Slots, v.Kind) : null);
+
+    private CrateLootConfig? CrateConfig(string id) => _config is not null && _config.Crates.TryGetValue(id, out var c) ? c : null;
+
+    private string ModeOf(string id) => CrateConfig(id) is { } c && c.Mode != "Vanilla" ? c.Mode : "Vanilla";
+
+    private void SetMode(CrateRow crate, VanillaCrate? vcrate, string mode)
+    {
+        if (_config is null) return;
+        if (!_config.Crates.TryGetValue(crate.Id, out var c))
+        {
+            if (mode == "Vanilla") return;
+            // Replacing starts from Rust's own list so it's easy to tweak; adding starts empty.
+            c = mode == "Replace" && vcrate is not null ? LootService.FromVanilla(vcrate) : new CrateLootConfig { MinItems = mode == "Add" ? 1 : 2, MaxItems = mode == "Add" ? 2 : 6 };
+            _config.Crates[crate.Id] = c;
+        }
+        else if (mode == "Replace" && c.Items.Count == 0 && vcrate is not null)
+        {
+            // An entry that only held a scrap setting: start the list from Rust's.
+            var copy = LootService.FromVanilla(vcrate, c.Scrap);
+            (c.MinItems, c.MaxItems, c.Items) = (copy.MinItems, copy.MaxItems, copy.Items);
+        }
+        c.Mode = mode;
+        _dirty = true;
+    }
+
+    private void CopyVanilla(string id, VanillaCrate vcrate, string mode)
+    {
+        if (_config is null) return;
+        var c = LootService.FromVanilla(vcrate, CrateConfig(id)?.Scrap ?? -1);
+        c.Mode = mode;
+        _config.Crates[id] = c;
+        _dirty = true;
+    }
+
+    private void AddItem(CrateLootConfig cfg, string text)
+    {
+        text = (text ?? "").Trim();
+        if (text.Length == 0) return;
+        var shortName = _itemsByShort.ContainsKey(text) ? _itemsByShort[text].Short
+            : _items.FirstOrDefault(i => string.Equals(i.Name, text, StringComparison.OrdinalIgnoreCase))?.Short ?? text;
+        if (cfg.Items.Any(i => string.Equals(i.Item, shortName, StringComparison.OrdinalIgnoreCase))) { Toasts.Show($"{NameOf(shortName)} is already in the list."); return; }
+        cfg.Items.Add(new LootItemConfig { Item = shortName, Min = 1, Max = 1, Chance = 25 });
+        _newItem = "";
+        _dirty = true;
+    }
+
+    private void SetScrap(string id, int scrap)
+    {
+        if (_config is null) return;
+        if (!_config.Crates.TryGetValue(id, out var c))
+        {
+            if (scrap < 0) return;
+            _config.Crates[id] = c = new CrateLootConfig();
+        }
+        c.Scrap = scrap;
+        _dirty = true;
+    }
+
+    /// <summary>A number box where blank means "Rust's own" (-1).</summary>
+    private static int Opt(ChangeEventArgs e) =>
+        double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0 ? (int)Math.Round(v) : -1;
+
+    private static double Num(ChangeEventArgs e, double fallback, double min) =>
+        double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? Math.Max(min, v) : fallback;
+
+    private static string ModeLabel(string mode) => mode switch
+    {
+        "Replace" => "Replace with my list",
+        "Add" => "Add my list to Rust's",
+        _ => "Rust's own loot",
+    };
+
+    private static string ModeLabelShort(string mode) => mode == "Replace" ? "Custom" : "Extra";
+
+    private static string ModeHelp(string mode) => mode switch
+    {
+        "Replace" => "Only what's in your list below (plus Rust's scrap if that's on).",
+        "Add" => "Rust's normal loot, then your list adds more on top.",
+        _ => "Rust's normal loot (the default). Pick another option to change it.",
+    };
+
+    private string NameOf(string shortName) => _itemsByShort.TryGetValue(shortName, out var i) ? i.Name : shortName;
+    private bool Known(string shortName) => _itemsByShort.Count == 0 || _itemsByShort.ContainsKey(shortName);
+
+    private static int Int(ChangeEventArgs e, int fallback, int min) =>
+        double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? Math.Max(min, (int)Math.Round(v)) : fallback;
+
+    private static double Pct(ChangeEventArgs e, double fallback) =>
+        double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? Math.Clamp(Math.Round(v, 2), 0, 100) : fallback;
+
+    private static string Pct(double chance) => chance >= 0.995 ? "100%" : chance >= 0.1 ? $"{chance * 100:0}%" : chance >= 0.01 ? $"{chance * 100:0.#}%" : $"{chance * 100:0.##}%";
+
+    private static string F(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+}

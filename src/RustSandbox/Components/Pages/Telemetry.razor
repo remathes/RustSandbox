@@ -152,7 +152,7 @@
                 }
             </div>
             <div class="panel-body">
-                <p style="margin-top:0">Players earn XP in nine skills (<strong>Mining</strong>, <strong>Woodcutting</strong>, <strong>Combat</strong>, <strong>Gardening</strong>, <strong>Electrician</strong>, <strong>Survival</strong>, <strong>Mechanic</strong>, <strong>Fishing</strong> and <strong>Scrapper</strong>), level up and spend points on perks: more ore, wood, crops and fish, faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels and batteries, slower hunger and thirst, and vehicles that burn less fuel. Solo players get +25% XP and an extra point every 5 levels; teammates playing close together share 10% of each other's XP. Players type <code>/skills</code> in chat to open the skills menu.</p>
+                <p style="margin-top:0">Players earn XP in ten skills (<strong>Mining</strong>, <strong>Woodcutting</strong>, <strong>Combat</strong>, <strong>Gardening</strong>, <strong>Electrician</strong>, <strong>Survival</strong>, <strong>Mechanic</strong>, <strong>Fishing</strong>, <strong>Scrapper</strong> and <strong>Cooking</strong>), level up and spend points on perks: more ore, wood, crops and fish, faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels and batteries, slower hunger and thirst, extra cooked food and teas, longer tea buffs, and vehicles that burn less fuel. Solo players get +25% XP and an extra point every 5 levels; teammates playing close together share 10% of each other's XP. Players type <code>/skills</code> in chat to open the skills menu.</p>
                 <div class="row">
                     @if (BundledPlugin.Skills.CannotInstallReason(Server) is null)
                     {
@@ -281,13 +281,63 @@
                 }
             </div>
             <div class="panel-body">
-                <p style="margin-top:0">One item that places a recycler with a repair bench built in. Players place it like a repair bench; opening it shows the recycler with a Repair panel beside it (put a damaged item in the first slot and press Repair). The owner can rotate or pick it up from that panel. Players make one with <code>/recycler craft</code>, and admins can hand them out with <code>/recycler give &lt;player&gt;</code> or the console command <code>sandboxrecycler.give &lt;steamid&gt;</code>. Craft cost, the per-player limit and who can use it are in <code>@ConfigPath(BundledPlugin.Recycler)</code>.</p>
+                <p style="margin-top:0">One item that places a recycler with a repair bench joined to its side in an L shape. Players place it like a repair bench, then recycle at the recycler and repair at the bench. The owner can rotate or pick up the whole station from the small panel that shows when either part is open. Repair mode (vanilla or full), recycler output % and speed, and the layout (Corner or Single) are config settings. Players make one with <code>/recycler craft</code>, and admins can hand them out with <code>/recycler give &lt;player&gt;</code> or the console command <code>sandboxrecycler.give &lt;steamid&gt;</code>. Craft cost, the per-player limit and who can use it are in <code>@ConfigPath(BundledPlugin.Recycler)</code>.</p>
                 <div class="row">
                     @if (BundledPlugin.Recycler.CannotInstallReason(Server) is null)
                     {
                         <button class="btn primary" @onclick="InstallRecyclerAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Recycler.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
                     }
                     <a class="btn" href="@BundledPlugin.Recycler.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Recycler.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Skins</h2>
+                <span class="spacer"></span>
+                @if (_skinsLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_skinsLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Players type <code>/skins</code> to put Rust skins on their clothes, weapons, tools and deployables. They see the skins they own on Steam plus Facepunch's free ones: since August 2025 Facepunch's server rules forbid handing out paid skins people don't own (there's a config switch to show every approved skin anyway, at your own risk). The skin list comes from the game, so there's nothing to download or keep up to date. To dress a quest giver, wear the outfit you want (skinned with /skins) and type <code>/questgiver outfit &lt;id&gt;</code>. Blocked skins or items can be set in <code>@ConfigPath(BundledPlugin.Skins)</code>.</p>
+                <div class="row">
+                    @if (BundledPlugin.Skins.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallSkinsAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Skins.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Skins.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Skins.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Loot</h2>
+                <span class="spacer"></span>
+                @if (_lootLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_lootLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Shows what Rust puts in every crate, barrel and NPC body, with the chance of each item, and lets you replace or add to any of them on the <a href="s/@Id/loot">Loot page</a>, plus a loot multiplier, scrap per crate and how many crates Heli and Bradley drop. Anything you don't change keeps Rust's own loot.</p>
+                <div class="row">
+                    @if (BundledPlugin.Loot.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallLootAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Loot.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Loot.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Loot.FileName</a>
                 </div>
             </div>
         </section>
@@ -327,7 +377,7 @@
 
 @code {
     private string _publicUrl = "";
-    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded, _recyclerLoaded;
+    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded, _recyclerLoaded, _skinsLoaded, _lootLoaded;
     private bool _showKey, _busy, _regenOpen;
 
     protected override async Task OnServerChangedAsync()
@@ -340,7 +390,7 @@
 
     private async Task CheckPluginAsync()
     {
-        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = _recyclerLoaded = null;
+        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = _recyclerLoaded = _skinsLoaded = _lootLoaded = null;
         if (Server is null || !Runtime.IsOnline) return;
         var list = await Connections.QueryAsync(Id, PluginService.Prefix(Server.Settings) + "plugins", TimeSpan.FromSeconds(8));
         _pluginLoaded = list is null ? null : list.Contains("RustSandboxTelemetry", StringComparison.OrdinalIgnoreCase);
@@ -351,6 +401,8 @@
         _questsLoaded = list is null ? null : list.Contains(BundledPlugin.Quests.PluginName, StringComparison.OrdinalIgnoreCase);
         _helpLoaded = list is null ? null : list.Contains(BundledPlugin.Help.PluginName, StringComparison.OrdinalIgnoreCase);
         _recyclerLoaded = list is null ? null : list.Contains(BundledPlugin.Recycler.PluginName, StringComparison.OrdinalIgnoreCase);
+        _skinsLoaded = list is null ? null : list.Contains(BundledPlugin.Skins.PluginName, StringComparison.OrdinalIgnoreCase);
+        _lootLoaded = list is null ? null : list.Contains(BundledPlugin.Loot.PluginName, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ReloadPluginAsync()
@@ -408,6 +460,8 @@
 
     private Task InstallQuestsAsync() => InstallBundledAsync(BundledPlugin.Quests, "Quests plugin installed. Place a quest giver from the Quests page.");
     private Task InstallHelpAsync() => InstallBundledAsync(BundledPlugin.Help, "Help plugin installed. Players type /help in game.");
+    private Task InstallSkinsAsync() => InstallBundledAsync(BundledPlugin.Skins, "Skins plugin installed. Players type /skins in game.");
+    private Task InstallLootAsync() => InstallBundledAsync(BundledPlugin.Loot, "Loot plugin installed. Set up crates on the Loot page.");
     private Task InstallRecyclerAsync() => InstallBundledAsync(BundledPlugin.Recycler, "Repair Recycler installed. Players type /recycler in game.");
 
     private async Task InstallBundledAsync(BundledPlugin plugin, string done)

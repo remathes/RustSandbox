@@ -80,9 +80,19 @@ namespace Oxide.Plugins
             },
             new Section
             {
+                Title = "Skins",
+                Plugin = "RustSandboxSkins",
+                Intro = "Put any approved Rust skin on your clothes, weapons, tools and deployables, even ones you don't own on Steam. Type /skins, pick an item on the left, then click a skin. Holding an item when you open it starts on that item.",
+                Commands =
+                {
+                    C("/skins", "Open the skin picker"),
+                },
+            },
+            new Section
+            {
                 Title = "Repair Recycler",
                 Plugin = "RustSandboxRecycler",
-                Intro = "A recycler with a repair bench built in, as one item. Place it like a repair bench and it becomes a recycler. Open it to recycle as normal, or put a damaged item in the first input slot, switch the recycler off and press Repair on the panel beside it. The owner can rotate it or pick it up from that panel.",
+                Intro = "A recycler and repair bench joined together in an L, as one item. Place it like a repair bench, then recycle at the recycler and repair at the bench. The owner can rotate or pick up the whole station from the small panel that shows when either part is open.",
                 Commands =
                 {
                     C("/recycler", "What it is and what it costs"),
@@ -93,7 +103,7 @@ namespace Oxide.Plugins
             {
                 Title = "Skills",
                 Plugin = "RustSandboxSkills",
-                Intro = "You earn XP in nine skills just by playing: mining, woodcutting, combat, gardening, electrician, survival, mechanic, fishing and scrapper. Each level gives points to spend on perks like more ore, faster crafting or less damage. Playing solo earns bonus XP.",
+                Intro = "You earn XP in ten skills just by playing: mining, woodcutting, combat, gardening, electrician, survival, mechanic, fishing, scrapper and cooking. Each level gives points to spend on perks like more ore, faster crafting or less damage. Playing solo earns bonus XP.",
                 Commands =
                 {
                     C("/skills", "Open the skills menu"),
@@ -163,6 +173,7 @@ namespace Oxide.Plugins
                     C("/questgiver remove", "Remove the quest giver next to you"),
                     C("/questgiver list", "List quest givers"),
                     C("/questgiver look <id> <look>", "Change a quest giver's outfit"),
+                    C("/questgiver outfit <id>", "Dress a quest giver in what you're wearing (skins too)"),
                     C("/hunt tp", "Teleport to your current treasure hunt clue"),
                 },
             },

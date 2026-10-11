@@ -28,6 +28,12 @@ public sealed record BundledPlugin(string PluginName, string Label, string Downl
     /// <summary>One deployable item that places a recycler with a repair bench built in.</summary>
     public static readonly BundledPlugin Recycler = new("RustSandboxRecycler", "Repair Recycler plugin", "/api/plugin/recycler");
 
+    /// <summary>A /skins picker that puts any approved Rust skin on players' clothes, weapons and items.</summary>
+    public static readonly BundledPlugin Skins = new("RustSandboxSkins", "Skins plugin", "/api/plugin/skins");
+
+    /// <summary>Custom loot tables per crate type, with Rust's own loot as the default.</summary>
+    public static readonly BundledPlugin Loot = new("RustSandboxLoot", "Loot plugin", "/api/plugin/loot");
+
     public string FileName => PluginName + ".cs";
 
     public string ReadSource()

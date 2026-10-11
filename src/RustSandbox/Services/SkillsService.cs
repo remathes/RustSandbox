@@ -56,6 +56,7 @@ public sealed class SkillsService(ServerConnectionManager conn, ILogger<SkillsSe
         new("mining", "Mining", "pickaxe"), new("woodcutting", "Woodcutting", "hatchet"), new("combat", "Combat", "longsword"),
         new("gardening", "Gardening", "corn"), new("electrician", "Electrician", "wiretool"), new("survival", "Survival", "bandage"),
         new("mechanic", "Mechanic", "gears"), new("fishing", "Fishing", "fishingrod.handmade"), new("scrapper", "Scrapper", "scrap"),
+        new("cooking", "Cooking", "bbq"),
     };
 
     /// <summary>Names and what one rank does (the {0} is the bonus), matching the plugin's English text.</summary>
@@ -87,6 +88,9 @@ public sealed class SkillsService(ServerConnectionManager conn, ILogger<SkillsSe
         new("quickrecycler", "scrapper", "Quick Recycler", "recyclers run {0}% faster"),
         new("bargain", "scrapper", "Bargain Research", "research costs {0}% less"),
         new("techdiscount", "scrapper", "Tech Tree Discount", "{0}% scrap back on tech tree unlocks"),
+        new("bigportions", "cooking", "Big Portions", "{0}% chance of an extra piece of cooked meat or fish"),
+        new("masterbrewer", "cooking", "Master Brewer", "{0}% chance of extra teas from a mixing table"),
+        new("steeped", "cooking", "Steeped", "tea and food buffs last {0}% longer"),
     };
 
     /// <summary>Perks whose bonus is a plain number, not a percentage.</summary>

@@ -1,7 +1,7 @@
 // Rust Sandbox — Repair Recycler
-// One deployable item that places a recycler with a repair bench built in. Players place it like a repair bench;
-// it turns into a recycler, and opening it shows a Repair panel next to the recycler, so there is one item, one
-// entity and one place to stand. Put a damaged item in the first input slot (recycler off) and press Repair.
+// One deployable item that places a recycler with a repair bench joined to it in an L (Corner layout, default),
+// or a recycler alone with a Repair panel beside its menu (Single layout). Rust can't load custom models from a
+// plugin, so the corner station is the real recycler and real repair bench, parented together so they act as one.
 // Get one with /recycler craft, or an admin can /recycler give <player>. Settings are in the config file.
 
 using System;
@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Repair Recycler", "RustSandbox", "1.1.0")]
+    [Info("Rust Sandbox Repair Recycler", "RustSandbox", "1.2.0")]
     [Description("A deployable recycler with a built-in repair bench, placed from one item.")]
     public class RustSandboxRecycler : RustPlugin
     {
@@ -23,6 +23,7 @@ namespace Oxide.Plugins
         private const string CraftPerm = "rustsandboxrecycler.craft";
         private const string BaseItem = "box.repair.bench";
         private const string DefaultPrefab = "assets/bundled/prefabs/static/recycler_static.prefab";
+        private const string BenchPrefab = "assets/prefabs/deployable/repair bench/repairbench_deployed.prefab";
         private const string RepairEffect = "assets/bundled/prefabs/fx/repairbench/itemrepair.prefab";
         private const string Ui = "SandboxRecycler.Panel";
 
@@ -50,7 +51,7 @@ namespace Oxide.Plugins
             [JsonProperty("Most each player can have placed (0 = no limit)")] public int MaxPerPlayer = 2;
             [JsonProperty("Only the owner, their team and building-authorised players can use it")] public bool Private = true;
             [JsonProperty("Always powered (ignore the power grid)")] public bool AlwaysPowered = true;
-            [JsonProperty("Repair mode: Full (back to brand new, no max condition lost) or Default (vanilla repair bench)")] public string RepairMode = "Full";
+            [JsonProperty("Repair mode: Default (vanilla repair bench) or Full (back to brand new, no max condition lost)")] public string RepairMode = "Default";
             [JsonProperty("Default mode: max condition lost per repair (vanilla 0.2)")] public float ConditionLoss = 0.2f;
             [JsonProperty("Recycler output % (0 = vanilla for that recycler)")] public float RecycleOutputPercent;
             [JsonProperty("Recycler seconds per item (0 = vanilla for that recycler)")] public float RecycleSeconds;
@@ -58,6 +59,11 @@ namespace Oxide.Plugins
             [JsonProperty("Repair panel position: pixels right of screen centre")] public float PanelX = 193f;
             [JsonProperty("Repair panel position: pixels up from the bottom")] public float PanelY = 430f;
             [JsonProperty("Recycler prefab (blank = find it automatically)")] public string Prefab = "";
+            [JsonProperty("Layout: Corner (repair bench joined to the recycler in an L) or Single (recycler with a Repair panel)")] public string Layout = "Corner";
+            [JsonProperty("Corner: bench side of the recycler (Left or Right)")] public string BenchSide = "Left";
+            [JsonProperty("Corner: move the bench forward/back in metres (+ = forward)")] public float BenchNudgeForward;
+            [JsonProperty("Corner: move the bench sideways in metres (+ = away from the recycler)")] public float BenchNudgeSide;
+            [JsonProperty("Corner: bench turn in degrees (90 = L shape)")] public float BenchTurn = 90f;
         }
 
         private PluginConfig _cfg;
@@ -82,7 +88,9 @@ namespace Oxide.Plugins
 
         protected override void SaveConfig() => Config.WriteObject(_cfg, true);
 
-        private bool FullRepair => !string.Equals(_cfg.RepairMode, "Default", StringComparison.OrdinalIgnoreCase);
+        private bool Corner => !string.Equals(_cfg.Layout, "Single", StringComparison.OrdinalIgnoreCase);
+
+        private bool FullRepair => string.Equals(_cfg.RepairMode, "Full", StringComparison.OrdinalIgnoreCase);
 
         #endregion
 
@@ -115,6 +123,18 @@ namespace Oxide.Plugins
         private void SaveData() => Interface.Oxide.DataFileSystem.WriteObject(DataFile, _data);
 
         private bool IsStation(BaseEntity e) => e is Recycler && e.net != null && _live.ContainsKey(e.net.ID.Value);
+
+        // The tracked recycler for either part of a station (the recycler itself or its joined repair bench).
+        private Recycler StationOf(BaseEntity e)
+        {
+            if (e == null) return null;
+            if (IsStation(e)) return (Recycler)e;
+            var parent = e is RepairBench ? e.GetParentEntity() : null;
+            return parent != null && IsStation(parent) ? (Recycler)parent : null;
+        }
+
+        private static RepairBench BenchOf(Recycler rec) =>
+            rec?.children?.OfType<RepairBench>().FirstOrDefault(b => b != null && !b.IsDestroyed);
 
         private void Track(Recycler rec, ulong owner)
         {
@@ -255,6 +275,7 @@ namespace Oxide.Plugins
             {
                 if (bench != null && !bench.IsDestroyed) bench.Kill();
                 var rec = SpawnRecycler(pos, rot, owner);
+                if (rec != null && Corner) SpawnBench(rec);
                 if (rec != null && !HasRoom(rec))
                 {
                     // Try the other three facings before giving up.
@@ -265,7 +286,7 @@ namespace Oxide.Plugins
                         rec = null;
                         if (player != null && player.IsConnected) player.ChatMessage($"There isn't enough room for the {_cfg.ItemName} there. It's back in your inventory.");
                     }
-                    else rec.SendNetworkUpdateImmediate();
+                    else SendMoved(rec);
                 }
                 if (rec == null)
                 {
@@ -274,7 +295,9 @@ namespace Oxide.Plugins
                 }
                 Track(rec, owner);
                 if (player != null && player.IsConnected)
-                    player.ChatMessage($"{_cfg.ItemName} placed. Open it to recycle, or use the Repair panel on the right to fix items.");
+                    player.ChatMessage(Corner
+                        ? $"{_cfg.ItemName} placed. Recycle at the recycler and repair at the bench."
+                        : $"{_cfg.ItemName} placed. Open it to recycle, or use the Repair panel on the right to fix items.");
             });
         }
 
@@ -288,21 +311,51 @@ namespace Oxide.Plugins
             return rec;
         }
 
+        // The bench sits beside the recycler, turned 90 degrees so the two make an L. It's parented to the recycler,
+        // so it moves, rotates and is removed with it.
+        private RepairBench SpawnBench(Recycler rec)
+        {
+            var bench = GameManager.server.CreateEntity(BenchPrefab, rec.transform.position, rec.transform.rotation) as RepairBench;
+            if (bench == null) { PrintWarning("Couldn't create the repair bench for a corner station."); return null; }
+            var rb = rec.bounds;
+            var side = string.Equals(_cfg.BenchSide, "Right", StringComparison.OrdinalIgnoreCase) ? 1f : -1f;
+            var turn = Quaternion.Euler(0f, _cfg.BenchTurn, 0f);
+            // The bench's own half-width along the recycler's x axis once it's turned.
+            var bb = bench.bounds;
+            var turnedExtents = turn * bb.extents;
+            var benchHalfX = Mathf.Abs(turnedExtents.x);
+            var benchHalfZ = Mathf.Abs(turnedExtents.z);
+            var x = rb.center.x + side * (rb.extents.x + benchHalfX + 0.05f + _cfg.BenchNudgeSide);
+            var z = rb.center.z + rb.extents.z - benchHalfZ + _cfg.BenchNudgeForward;
+            bench.OwnerID = rec.OwnerID;
+            bench.SetParent(rec);
+            bench.transform.localPosition = new Vector3(x, 0f, z);
+            bench.transform.localRotation = turn;
+            bench.Spawn();
+            return bench;
+        }
+
         private static readonly int RoomMask = LayerMask.GetMask("Construction", "Deployed", "World", "Default");
 
         // The recycler is bigger than the bench it replaced, so make sure it isn't inside a wall or another deployable.
         private bool HasRoom(Recycler rec)
         {
-            var b = rec.bounds;
+            var bench = BenchOf(rec);
+            return FitsAt(rec, rec) && (bench == null || FitsAt(bench, rec));
+        }
+
+        private bool FitsAt(BaseEntity ent, Recycler rec)
+        {
+            var b = ent.bounds;
             var lift = 0.2f;
             var half = new Vector3(Mathf.Max(0.05f, b.extents.x - 0.1f), Mathf.Max(0.05f, b.extents.y - lift), Mathf.Max(0.05f, b.extents.z - 0.1f));
-            var centre = rec.transform.TransformPoint(b.center + new Vector3(0f, lift * 0.5f + 0.05f, 0f));
-            var hits = Physics.OverlapBox(centre, half, rec.transform.rotation, RoomMask, QueryTriggerInteraction.Ignore);
+            var centre = ent.transform.TransformPoint(b.center + new Vector3(0f, lift * 0.5f + 0.05f, 0f));
+            var hits = Physics.OverlapBox(centre, half, ent.transform.rotation, RoomMask, QueryTriggerInteraction.Ignore);
             foreach (var c in hits)
             {
                 var e = c.ToBaseEntity();
                 // The bench this replaced is killed this frame but its collider lingers until the frame ends.
-                if (e == rec || (e != null && e.IsDestroyed)) continue;
+                if (e == rec || (e != null && (e.IsDestroyed || e.GetParentEntity() == rec))) continue;
                 return false;
             }
             return true;
@@ -319,8 +372,19 @@ namespace Oxide.Plugins
         {
             if (rec?.net == null || !_live.ContainsKey(rec.net.ID.Value)) return;
             foreach (var p in Looters(rec)) CuiHelper.DestroyUi(p, Ui);
+            var bench = BenchOf(rec);
+            if (bench != null)
+            {
+                foreach (var p in Looters(bench)) CuiHelper.DestroyUi(p, Ui);
+                NextTick(() => { if (bench != null && !bench.IsDestroyed) bench.Kill(); });
+            }
             Untrack(rec.net.ID.Value);
         }
+
+        // The joined bench can't be hurt, decay or be picked up on its own; the station is picked up as a whole.
+        private object OnEntityTakeDamage(RepairBench bench, HitInfo info) => StationOf(bench) != null ? (object)true : null;
+
+        private object CanPickupEntity(BasePlayer player, RepairBench bench) => StationOf(bench) != null ? (object)false : null;
 
         #endregion
 
@@ -341,7 +405,8 @@ namespace Oxide.Plugins
 
         private object CanLootEntity(BasePlayer player, StorageContainer container)
         {
-            if (!IsStation(container) || CanUse(player, container)) return null;
+            var station = StationOf(container);
+            if (station == null || CanUse(player, station)) return null;
             player.ChatMessage($"This {_cfg.ItemName} belongs to someone else.");
             return false;
         }
@@ -359,15 +424,15 @@ namespace Oxide.Plugins
 
         private void OnLootEntity(BasePlayer player, BaseEntity entity)
         {
-            if (!IsStation(entity)) return;
-            var rec = (Recycler)entity;
+            var rec = StationOf(entity);
+            if (rec == null) return;
             if (_cfg.AlwaysPowered) KeepPowered(rec);
             NextTick(() => DrawPanel(player, rec));
         }
 
         private void OnLootEntityEnd(BasePlayer player, BaseCombatEntity entity)
         {
-            if (IsStation(entity)) CuiHelper.DestroyUi(player, Ui);
+            if (StationOf(entity) != null) CuiHelper.DestroyUi(player, Ui);
         }
 
         private void OnPlayerDisconnected(BasePlayer player) => CuiHelper.DestroyUi(player, Ui);
@@ -390,14 +455,10 @@ namespace Oxide.Plugins
             });
         }
 
-        private static IEnumerable<BasePlayer> Looters(Recycler rec) =>
-            BasePlayer.activePlayerList.Where(p => p != null && p.inventory?.loot?.entitySource == rec);
+        private static IEnumerable<BasePlayer> Looters(BaseEntity ent) =>
+            BasePlayer.activePlayerList.Where(p => p != null && p.inventory?.loot?.entitySource == ent);
 
-        private Recycler LootedStation(BasePlayer player)
-        {
-            var rec = player?.inventory?.loot?.entitySource as Recycler;
-            return rec != null && IsStation(rec) ? rec : null;
-        }
+        private Recycler LootedStation(BasePlayer player) => StationOf(player?.inventory?.loot?.entitySource);
 
         #endregion
 
@@ -412,9 +473,11 @@ namespace Oxide.Plugins
         }
 
         // Same checks and cost as the vanilla repair bench (RepairBench.RepairAnItem), so the panel can explain itself.
-        private RepairInfo GetRepairInfo(BasePlayer player, Recycler rec)
+        private RepairInfo GetRepairInfo(BasePlayer player, Recycler rec) => GetRepairInfo(player, rec.inventory.GetSlot(0));
+
+        private RepairInfo GetRepairInfo(BasePlayer player, Item slotItem)
         {
-            var info = new RepairInfo { Item = rec.inventory.GetSlot(0) };
+            var info = new RepairInfo { Item = slotItem };
             var item = info.Item;
             if (item == null) { info.Problem = "Put a damaged item in the first input slot."; return info; }
             var bp = item.info.Blueprint;
@@ -465,10 +528,25 @@ namespace Oxide.Plugins
             DrawPanel(player, rec);
         }
 
-        private void RepairFully(BasePlayer player, Recycler rec, RepairInfo info)
+        private bool _repairing;
+
+        // Full repair mode at a corner station's bench: replace the vanilla repair with a full one.
+        private object OnItemRepair(BasePlayer player, Item item)
+        {
+            if (_repairing || !FullRepair || player == null) return null;
+            var bench = player.inventory?.loot?.entitySource as RepairBench;
+            if (bench == null || StationOf(bench) == null) return null;
+            var info = GetRepairInfo(player, item);
+            if (info.Problem == null && info.CanAfford) RepairFully(player, bench, info);
+            return false;
+        }
+
+        private void RepairFully(BasePlayer player, BaseEntity rec, RepairInfo info)
         {
             var item = info.Item;
-            if (Interface.CallHook("OnItemRepair", player, item) != null) return;
+            _repairing = true;
+            try { if (Interface.CallHook("OnItemRepair", player, item) != null) return; }
+            finally { _repairing = false; }
             foreach (var c in info.Cost) player.inventory.Take(null, c.Key.itemid, c.Value);
             item.maxCondition = item.info.condition.max;
             item.condition = item.maxCondition;
@@ -508,6 +586,12 @@ namespace Oxide.Plugins
             return $"Recycler: {Mathf.RoundToInt(eff * 100f)}% output, {dur:0.#}s per item";
         }
 
+        private static void SendMoved(Recycler rec)
+        {
+            rec.SendNetworkUpdateImmediate();
+            BenchOf(rec)?.SendNetworkUpdateImmediate();
+        }
+
         [ConsoleCommand("sandboxrecycler.rotate")]
         private void CmdRotate(ConsoleSystem.Arg arg)
         {
@@ -518,7 +602,7 @@ namespace Oxide.Plugins
             for (int i = 0; i < 3; i++)
             {
                 rec.transform.rotation *= Quaternion.Euler(0f, 90f, 0f);
-                if (HasRoom(rec)) { rec.SendNetworkUpdateImmediate(); return; }
+                if (HasRoom(rec)) { SendMoved(rec); return; }
             }
             rec.transform.rotation = start;
             player.ChatMessage("There's no room to turn it here.");
@@ -533,13 +617,17 @@ namespace Oxide.Plugins
             if (rec.IsOn()) { player.ChatMessage("Switch the recycler off first."); return; }
             player.EndLooting();
             CuiHelper.DestroyUi(player, Ui);
-            foreach (var item in rec.inventory.itemList.ToList())
+            var bench = BenchOf(rec);
+            var items = rec.inventory.itemList.ToList();
+            if (bench != null) items.AddRange(bench.inventory.itemList);
+            foreach (var item in items)
             {
                 item.RemoveFromContainer();
                 if (!item.MoveToContainer(player.inventory.containerMain) && !item.MoveToContainer(player.inventory.containerBelt))
                     item.Drop(player.eyes.position, player.eyes.BodyForward() * 2f);
             }
             var id = rec.net.ID.Value;
+            if (bench != null && !bench.IsDestroyed) bench.Kill();
             rec.Kill();
             Untrack(id);
             Give(player);
@@ -554,10 +642,12 @@ namespace Oxide.Plugins
         {
             if (player == null || !player.IsConnected || rec == null || rec.IsDestroyed) return;
             CuiHelper.DestroyUi(player, Ui);
-            if (player.inventory?.loot?.entitySource != rec) return;
+            var looted = player.inventory?.loot?.entitySource;
+            if (looted == null || StationOf(looted) != rec) return;
+            var owner = IsOwner(player, rec);
+            if (BenchOf(rec) != null) { DrawCornerPanel(player, rec, looted is RepairBench, owner); return; }
 
             var info = GetRepairInfo(player, rec);
-            var owner = IsOwner(player, rec);
             const float w = 380f, h = 150f;
             var ui = new CuiElementContainer();
             ui.Add(new CuiPanel
@@ -597,6 +687,30 @@ namespace Oxide.Plugins
             {
                 Button(ui, "ROTATE", "sandboxrecycler.rotate", $"{w - 214} 8", $"{w - 114} 38", "0.28 0.28 0.28 0.95", "1 1 1 0.9");
                 Button(ui, "PICK UP", "sandboxrecycler.pickup", $"{w - 108} 8", $"{w - 8} 38", "0.45 0.22 0.18 0.95", "1 1 1 0.9");
+            }
+            CuiHelper.AddUi(player, ui);
+        }
+
+        // Corner stations use the real bench for repairs, so the panel only carries the settings line and owner buttons.
+        private void DrawCornerPanel(BasePlayer player, Recycler rec, bool atBench, bool owner)
+        {
+            const float w = 380f, h = 82f;
+            var ui = new CuiElementContainer();
+            ui.Add(new CuiPanel
+            {
+                Image = { Color = "0.10 0.10 0.10 0.92" },
+                RectTransform = { AnchorMin = "0.5 0", AnchorMax = "0.5 0", OffsetMin = $"{_cfg.PanelX} {_cfg.PanelY}", OffsetMax = $"{_cfg.PanelX + w} {_cfg.PanelY + h}" },
+            }, "Hud.Menu", Ui);
+            ui.Add(new CuiPanel { Image = { Color = "0.35 0.55 0.25 0.9" }, RectTransform = { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = "0 -24", OffsetMax = "0 0" } }, Ui);
+            Label(ui, _cfg.ItemName.ToUpperInvariant(), 13, "8 -24", "-8 0", "0 1", "1 1", TextAnchor.MiddleLeft, "1 1 1 0.95", true);
+            var line = atBench
+                ? (FullRepair ? "Full repair: items come back brand new, max condition restored" : "Vanilla repair (same as a normal repair bench)")
+                : RecycleStatsText(rec);
+            Label(ui, line, 11, "10 -48", "-10 -26", "0 1", "1 1", TextAnchor.MiddleLeft, "1 1 1 0.75", false);
+            if (owner)
+            {
+                Button(ui, "ROTATE", "sandboxrecycler.rotate", $"{w - 214} 8", $"{w - 114} 32", "0.28 0.28 0.28 0.95", "1 1 1 0.9");
+                Button(ui, "PICK UP", "sandboxrecycler.pickup", $"{w - 108} 8", $"{w - 8} 32", "0.45 0.22 0.18 0.95", "1 1 1 0.9");
             }
             CuiHelper.AddUi(player, ui);
         }

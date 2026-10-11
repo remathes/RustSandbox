@@ -22,6 +22,11 @@ A self-hosted web app (ASP.NET Core 8 + Blazor Server, C#) for running one or ma
 | **Hosting (optional)** | When the server runs on the same machine: start/stop/restart with countdowns, crash auto-restart (with crash-loop protection), SteamCMD install/update, one-click Oxide or Carbon install, one-click plugin install, safe wipes (files are moved to `wipe-backups/`, not deleted). |
 | **Dashboard controls** | Start, stop, restart (with countdown), map wipe and full wipe in one panel, next to a live heat map of the server and the installed vs latest Rust build and Oxide/Carbon version. |
 | **Updates** | Checks every 30 min for new Rust builds (Steam) and Oxide/Carbon releases (GitHub). Shows "Update available" on the dashboard and server list, writes to the console and posts to Discord. **Update now** warns players, saves and stops the server, updates Rust through SteamCMD, reinstalls Oxide/Carbon to match, and starts it again. Optional fully automatic updates. SteamCMD is downloaded automatically if you don't have it. |
+| **Skills** | Ten skills that level up as you play (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking), each with perks, plus a solo-friendly XP bonus. Leaderboards and each player's levels in the manager. |
+| **Daily rewards** | A daily spin for a random item with rarity tiers, streak bonuses and a spinning reel. Edit the prize pool in the manager. |
+| **Quests** | Quest givers you place around the map (with outfits and skins), quests to gather, hunt, loot, craft, deliver, swipe keycards or explore, a progress tracker and rewards you pick from pictures of every item. |
+| **Loot** | Every crate, barrel and NPC body with Rust's own items and the real chance of each one, worked out from the game's loot tables. Keep Rust's loot, replace it with your own list or add to it, each item with an amount and a chance %. Plus a loot multiplier, scrap per crate and how many crates Patrol Heli and Bradley drop. |
+| **Events** | A treasure hunt across the map's monuments and a train heist on a self-driving loot train, with an in-game HUD for running events and locked-crate timers. |
 | **Rates & stacks** | Built-in gather rates (1x–10x presets, per resource, per source: hits, pickups, farming, quarries), optional "[10x]" tag in the server name, stack sizes per category or per item (item list read live from your server with vanilla sizes), smelt speed/output, food cooking speed, wood use per oven and charcoal. Applied live by the bundled `RustSandboxTweaks` plugin; turning it off restores vanilla values. |
 | **Plugins** | Installed list with version, author and loaded/not-loaded status; turn plugins on/off (disabled ones are moved to `plugins/disabled` so they stay off), reload, delete; edit each plugin's JSON config with validation, a `.bak` backup and automatic reload; search uMod and install in one click; upload `.cs` files; check uMod for newer versions and update one or all. |
 | **Groups & permissions** | Create/delete Oxide or Carbon groups, add/remove members, and tick plugin permissions per group or per player (grouped by plugin, with "from a group" hints). |
@@ -91,6 +96,26 @@ The plugin batches events every 5 s and posts them to `POST /api/telemetry/{serv
 
 It records: every player death (killer, weapon, distance, body part, headshot, positions, cause for environmental deaths), players killing scientists/animals/heli/Bradley, shots fired and hits per weapon, what players gather (plugin 1.5.0+), positions, and connects/disconnects.
 
+## Game plugins included
+
+The manager ships these Oxide/Carbon plugins and installs each one with a button on the **Telemetry** page (servers on this machine), or you can download the `.cs` from there.
+
+| Plugin | What players get | Commands |
+|---|---|---|
+| `RustSandboxTelemetry` | Feeds combat, gathering and position stats to the manager. | – |
+| `RustSandboxTweaks` | Gather rates, stack sizes, smelting and cooking speed, inventory sorting, furnace auto-split, remove tool. | `/sort`, `/autosplit`, `/remove` |
+| `RustSandboxEventHud` | HUD tiles for airdrops, Patrol Heli, Bradley, Cargo, Chinook and oil rigs, locked-crate timers, a radiation detector and a compass/grid tile. | `/eventhud` |
+| `RustSandboxSkills` | Ten skills with levels and perks. | `/skills` |
+| `RustSandboxDaily` | A daily reward spin with streaks. | `/daily` |
+| `RustSandboxEvents` | Treasure hunt and train heist events. | `/hunt` |
+| `RustSandboxQuests` | Quest givers, quests, tracker and rewards. | `/quests`, admin `/questgiver` |
+| `RustSandboxHelp` | A `/help` guide with a page per system, shown to new players. | `/help` |
+| `RustSandboxRecycler` | **Repair Recycler**: one deployable item that places a recycler and repair bench joined in an L. Optional full repair, recycler speed and output (vanilla by default). | `/recycler`, `/recycler craft` |
+| `RustSandboxSkins` | A `/skins` picker for clothes, weapons, tools and deployables. Shows the skins each player owns on Steam plus Facepunch's free ones, because Facepunch's server rules forbid handing out paid skins people don't own. | `/skins` |
+| `RustSandboxLoot` | Custom loot per crate, barrel and NPC type (edited on the manager's **Loot** page). Anything you don't change keeps Rust's own loot. | console `sandboxloot.refill` |
+
+Each plugin's settings are in its config file (`oxide/config/<plugin>.json`) and most are also editable in the manager.
+
 ## About the map previews
 
 The map generator and the live map background are drawn in the browser from the seed and size with a procedural approximation (coastline, biomes north→south, rivers, ring road, monument markers). They're consistent for a given seed and good for comparing the *feel* of seeds, but they are **not** Facepunch's world generator — use the RustMaps link to see the real terrain, or paste an exported map image URL into *Settings → World → Live map image* to use it as the live-map background. Player positions, kills and grid references are always exact.
@@ -113,8 +138,9 @@ src/RustSandbox/
     Demo/                    simulated demo world
   Components/                Blazor layout, pages and shared components
   wwwroot/                   CSS, map/heat-map JavaScript
-plugins/RustSandboxTelemetry.cs   Oxide/Carbon plugin
-plugins/RustSandboxTweaks.cs      Rates, stacks & smelting plugin (installed by the manager)
+plugins/RustSandboxTelemetry.cs   stats plugin
+plugins/RustSandboxTweaks.cs      rates, stacks & smelting
+plugins/RustSandbox*.cs           the other game plugins (see "Game plugins included")
 ```
 
 ## Notes & limits
@@ -127,6 +153,10 @@ plugins/RustSandboxTweaks.cs      Rates, stacks & smelting plugin (installed by 
 - Starting/stopping servers you don't host on this machine isn't possible over RCON; *Stop* sends `quit` and *Restart* uses Rust's `restart` command, so your host must bring the server back.
 - Carbon on Linux has to be launched through Carbon's `environment.sh`; the built-in process manager targets Windows and Oxide-on-Linux best.
 - If the manager restarts, it loses track of server processes it started (they keep running); stop them from the console with `quit` or restart the server manually.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

@@ -1,6 +1,6 @@
 // Rust Sandbox — Skills
-// Players earn XP in nine skills (Mining, Woodcutting, Combat, Gardening, Electrician, Survival,
-// Mechanic, Fishing, Scrapper), level up, and spend points on perks: more ore, wood, crops and fish,
+// Players earn XP in ten skills (Mining, Woodcutting, Combat, Gardening, Electrician, Survival,
+// Mechanic, Fishing, Scrapper, Cooking), level up, and spend points on perks: more ore, wood, crops and fish,
 // faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels...
 //
 // Solo friendly: players without a team earn bonus XP and extra points, so one person can
@@ -21,8 +21,8 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Skills", "RustSandbox", "1.5.1")]
-    [Description("Nine skills with levels and perks (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper) and a solo-friendly XP bonus.")]
+    [Info("Rust Sandbox Skills", "RustSandbox", "1.6.0")]
+    [Description("Ten skills with levels and perks (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking) and a solo-friendly XP bonus.")]
     public class RustSandboxSkills : RustPlugin
     {
         #region Definitions
@@ -36,7 +36,8 @@ namespace Oxide.Plugins
         private const string Mechanic = "mechanic";
         private const string Fishing = "fishing";
         private const string Scrapper = "scrapper";
-        private static readonly string[] Skills = { Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper };
+        private const string Cooking = "cooking";
+        private static readonly string[] Skills = { Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking };
 
         private class PerkDef
         {
@@ -79,6 +80,9 @@ namespace Oxide.Plugins
             new PerkDef { Id = "quickrecycler", Skill = Scrapper, DefaultMaxRank = 5, DefaultPerRank = 0.08, Tracked = false },
             new PerkDef { Id = "bargain", Skill = Scrapper, DefaultMaxRank = 5, DefaultPerRank = 0.08 },
             new PerkDef { Id = "techdiscount", Skill = Scrapper, DefaultMaxRank = 3, DefaultPerRank = 0.10 },
+            new PerkDef { Id = "bigportions", Skill = Cooking, DefaultMaxRank = 5, DefaultPerRank = 0.06 },
+            new PerkDef { Id = "masterbrewer", Skill = Cooking, DefaultMaxRank = 3, DefaultPerRank = 0.10 },
+            new PerkDef { Id = "steeped", Skill = Cooking, DefaultMaxRank = 5, DefaultPerRank = 0.10 },
         };
 
         private static PerkDef FindPerk(string id)
@@ -139,6 +143,8 @@ namespace Oxide.Plugins
             [JsonProperty("XP per recycler cycle you started")] public double XpRecycle = 2;
             [JsonProperty("XP per blueprint researched")] public double XpResearch = 20;
             [JsonProperty("XP per tech tree unlock")] public double XpTechTree = 15;
+            [JsonProperty("XP per piece of meat or fish cooked")] public double XpCookMeat = 2;
+            [JsonProperty("XP per tea or other item made at a mixing table")] public double XpBrew = 8;
             [JsonProperty("Combat XP by prefab")] public Dictionary<string, double> CombatXp = new Dictionary<string, double>
             {
                 ["chicken"] = 5,
@@ -269,6 +275,19 @@ namespace Oxide.Plugins
                 ["Skill.mechanic"] = "Mechanic",
                 ["Skill.fishing"] = "Fishing",
                 ["Skill.scrapper"] = "Scrapper",
+                ["Skill.cooking"] = "Cooking",
+                ["Perk.bigportions"] = "Big Portions",
+                ["Perk.bigportions.Desc"] = "{0}% chance of an extra piece when meat or fish cooks",
+                ["Perk.masterbrewer"] = "Master Brewer",
+                ["Perk.masterbrewer.Desc"] = "{0}% chance of extra teas from a mixing table",
+                ["Perk.steeped"] = "Steeped",
+                ["Perk.steeped.Desc"] = "Tea and other food buffs last {0}% longer",
+                ["Pop.bigportions"] = "<color=#ffd479>Big Portions</color> +{0} cooked",
+                ["Pop.masterbrewer"] = "<color=#ffd479>Master Brewer</color> +{0} extra",
+                ["Pop.steeped"] = "<color=#ffd479>Steeped</color> buff +{0}s",
+                ["Total.bigportions"] = "{0} extra cooked food",
+                ["Total.masterbrewer"] = "{0} extra teas",
+                ["Total.steeped"] = "{0} seconds of extra buffs",
                 ["Perk.prospector"] = "Prospector",
                 ["Perk.prospector.Desc"] = "+{0}% ore and stone from nodes",
                 ["Perk.luckystrike"] = "Lucky Strike",
@@ -1199,6 +1218,8 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(BaseNetworkable net)
         {
+            var oven = net as BaseOven;
+            if (oven != null) _rawBefore.Remove(oven);
             var e = net as BaseEntity;
             if (e == null) return;
             _power.Remove(e);
@@ -1415,6 +1436,97 @@ namespace Oxide.Plugins
                 if (extra != null) player.GiveItem(extra, BaseEntity.GiveItemReason.Crafted);
                 Note(player, "bigcatch", 1);
             });
+        }
+
+        #endregion
+
+        #region Cooking (Big Portions, Master Brewer, Steeped)
+
+        // Ovens don't say what they cooked, so count the raw food before and after each cook tick.
+        // Raw food is anything that cooks into a ".cooked" item (meat and fish; burning cooked food doesn't count).
+        private readonly Dictionary<BaseOven, Dictionary<ItemDefinition, int>> _rawBefore = new Dictionary<BaseOven, Dictionary<ItemDefinition, int>>();
+
+        private static bool IsRawFood(Item item)
+        {
+            var info = item?.info?.ItemModCookable;
+            return info != null && info.becomeOnCooked != null && item.info.category == ItemCategory.Food
+                   && info.becomeOnCooked.shortname.EndsWith(".cooked");
+        }
+
+        private void OnOvenCook(BaseOven oven, Item fuel)
+        {
+            if (oven?.inventory == null) return;
+            Dictionary<ItemDefinition, int> counts = null;
+            foreach (var item in oven.inventory.itemList)
+            {
+                if (!IsRawFood(item)) continue;
+                if (counts == null) counts = new Dictionary<ItemDefinition, int>();
+                int n;
+                counts.TryGetValue(item.info, out n);
+                counts[item.info] = n + item.amount;
+            }
+            if (counts == null) _rawBefore.Remove(oven);
+            else _rawBefore[oven] = counts;
+        }
+
+        private void OnOvenCooked(BaseOven oven, Item fuel, BaseEntity slot)
+        {
+            Dictionary<ItemDefinition, int> before;
+            if (oven == null || !_rawBefore.TryGetValue(oven, out before)) return;
+            _rawBefore.Remove(oven);
+            var player = oven.LastLootedByPlayer;
+            if (player == null || !player.IsConnected || !Allowed(player)) return;
+            var cooked = 0;
+            var extra = 0;
+            var chance = Bonus(player.userID, "bigportions");
+            foreach (var kv in before)
+            {
+                var now = 0;
+                foreach (var item in oven.inventory.itemList)
+                    if (item.info == kv.Key) now += item.amount;
+                var done = kv.Value - now;
+                if (done <= 0) continue;
+                cooked += done;
+                if (chance <= 0) continue;
+                var bonus = 0;
+                for (var i = 0; i < done; i++) if (UnityEngine.Random.value < chance) bonus++;
+                if (bonus <= 0) continue;
+                var output = ItemManager.Create(kv.Key.ItemModCookable.becomeOnCooked, bonus);
+                if (output == null) continue;
+                if (!output.MoveToContainer(oven.inventory)) output.Drop(oven.transform.position + Vector3.up, Vector3.up);
+                extra += bonus;
+            }
+            if (cooked <= 0) return;
+            Earn(player, Cooking, cooked * _config.XpCookMeat);
+            if (extra > 0) Note(player, "bigportions", extra);
+        }
+
+        private void OnMixingTableFinished(MixingTable table, BasePlayer player, Recipe recipe, int quantity)
+        {
+            if (table == null || recipe == null || recipe.ProducedItem == null || !Allowed(player)) return;
+            var made = Math.Max(1, quantity) * Math.Max(1, recipe.ProducedItemCount);
+            Earn(player, Cooking, made * _config.XpBrew);
+            var chance = Bonus(player.userID, "masterbrewer");
+            if (chance <= 0) return;
+            var bonus = 0;
+            for (var i = 0; i < made; i++) if (UnityEngine.Random.value < chance) bonus++;
+            if (bonus <= 0) return;
+            var extra = ItemManager.Create(recipe.ProducedItem, bonus);
+            if (extra == null) return;
+            if (!extra.MoveToContainer(table.inventory)) player.GiveItem(extra, BaseEntity.GiveItemReason.Crafted);
+            Note(player, "masterbrewer", bonus);
+        }
+
+        // Teas (and any food with a timed buff) last longer: add the buffs ourselves with a longer duration.
+        private object OnPlayerAddModifiers(BasePlayer player, Item item, ItemModConsumable consumable)
+        {
+            if (player == null || consumable?.modifiers == null || consumable.modifiers.Count == 0 || !Allowed(player)) return null;
+            var longer = Bonus(player.userID, "steeped");
+            if (longer <= 0) return null;
+            PlayerModifiers.AddToPlayer(player, consumable.modifiers, 1f, 1f + (float)longer);
+            var added = consumable.modifiers.Max(m => m.duration) * longer;
+            if (added >= 1) Note(player, "steeped", Math.Round(added));
+            return false;
         }
 
         #endregion
@@ -1852,6 +1964,10 @@ namespace Oxide.Plugins
             ["quickrecycler"] = "scraptea",
             ["bargain"] = "research.table",
             ["techdiscount"] = "workbench2",
+            [Cooking] = "bbq",
+            ["bigportions"] = "meat.pork.cooked",
+            ["masterbrewer"] = "mixingtable",
+            ["steeped"] = "maxhealthtea.advanced",
         };
 
         private class MenuState
@@ -2041,18 +2157,19 @@ namespace Oxide.Plugins
             Label(c, MenuMain, bonus, 13, 260, 452, 800, 500, TextAnchor.MiddleRight, ColMuted);
             Button(c, MenuMain, "X", 16, "sandboxskills.ui close", ColRed, 812, 462, 848, 490);
 
-            // Skill tabs: nine compact rows, 37 high
+            // Skill tabs: one compact row each, squeezed to fit above the footer
+            var rowH = Skills.Length > 9 ? 34f : 37f;
             for (var i = 0; i < Skills.Length; i++)
             {
                 var skill = Skills[i];
                 var sd = d.Skills[skill];
-                var top = 436f - i * 41;
+                var top = 436f - i * (rowH + (Skills.Length > 9 ? 3f : 4f));
                 var tab = MenuMain + ".Tab" + i;
-                Button(c, MenuMain, "", 1, "sandboxskills.ui tab " + skill, skill == m.Skill ? ColTabOn : ColCard, 16, top - 37, 276, top, tab);
-                Icon(c, tab, skill, 5, 4, 34, 33);
-                Label(c, tab, SkillName(skill, id), 13, 42, 17, 170, 36);
+                Button(c, MenuMain, "", 1, "sandboxskills.ui tab " + skill, skill == m.Skill ? ColTabOn : ColCard, 16, top - rowH, 276, top, tab);
+                Icon(c, tab, skill, 5, 3, 5 + rowH - 6, rowH - 3);
+                Label(c, tab, SkillName(skill, id), 13, 42, 16, 170, rowH - 1);
                 var free = PointsFree(d, skill);
-                Label(c, tab, free > 0 ? Msg("UiTabPoints", id, free, sd.Level) : Msg("UiTabLevel", id, sd.Level), 11, 140, 17, 254, 36,
+                Label(c, tab, free > 0 ? Msg("UiTabPoints", id, free, sd.Level) : Msg("UiTabLevel", id, sd.Level), 11, 140, 16, 254, rowH - 1,
                     TextAnchor.MiddleRight, "1 0.83 0.47 1");
                 var maxed = sd.Level >= _config.MaxLevel;
                 var need = XpToNext(sd.Level);

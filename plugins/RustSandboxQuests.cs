@@ -28,7 +28,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Quests", "RustSandbox", "1.2.0")]
+    [Info("Rust Sandbox Quests", "RustSandbox", "1.3.0")]
     [Description("Quest givers you place in the world, quests with gather/kill/loot/craft/deliver/keycard/visit goals, a progress tracker and rewards.")]
     public class RustSandboxQuests : RustPlugin
     {
@@ -108,7 +108,7 @@ namespace Oxide.Plugins
             {
                 Id = "tool-time", Title = "Tool Time", Type = TypeCraft, Target = "spear.wooden", Amount = 5,
                 Description = "Show me you know your way around a workbench. Five wooden spears will do.",
-                Rewards = { R("salvaged.axe", 1) },
+                Rewards = { R("axe.salvaged", 1) },
             },
             new Quest
             {
@@ -170,6 +170,9 @@ namespace Oxide.Plugins
                     if (q.Commands == null) q.Commands = new List<string>();
                     if (string.IsNullOrEmpty(q.Id)) q.Id = Slug(q.Title);
                     if (q.Amount < 1) q.Amount = 1;
+                    // 1.2.0 and earlier shipped Tool Time with a misspelled reward item (the real shortname is axe.salvaged).
+                    foreach (var r in q.Rewards)
+                        if (r != null && r.Item == "salvaged.axe") r.Item = "axe.salvaged";
                 }
                 SaveConfig();
             }
@@ -339,6 +342,14 @@ namespace Oxide.Plugins
             public string Look = "";
             public float X, Y, Z, Yaw;
             public string Map = "";
+            // Clothing (with skins) worn instead of the look's own outfit. Empty = the look's outfit.
+            public List<OutfitItem> Outfit = new List<OutfitItem>();
+        }
+
+        private class OutfitItem
+        {
+            public string Item = "";
+            public ulong Skin;
         }
 
         private class GiverData
@@ -556,6 +567,7 @@ namespace Oxide.Plugins
             npc.enableSaving = false;
             npc.Spawn();
             npc.displayName = g.Name;
+            Dress(npc, g);
             _spawned[g.Id] = npc;
             if (npc.net != null) _npcToGiver[npc.net.ID.Value] = g.Id;
             SpawnShopMarker(g);
@@ -568,6 +580,35 @@ namespace Oxide.Plugins
                 foreach (var m in markers)
                     if (m != null && !m.IsDestroyed) m.Kill();
             });
+        }
+
+        private void Dress(NPCTalking npc, Giver g)
+        {
+            if (g.Outfit == null || g.Outfit.Count == 0) return;
+            var wear = npc.inventory.containerWear;
+            foreach (var old in wear.itemList.ToList()) { old.RemoveFromContainer(); old.Remove(); }
+            foreach (var o in g.Outfit)
+            {
+                var item = ItemManager.CreateByName(o.Item, 1, o.Skin);
+                if (item != null && !item.MoveToContainer(wear)) item.Remove();
+            }
+            npc.SendNetworkUpdate();
+        }
+
+        // Copies what the player is wearing (skins included) onto a quest giver.
+        private string SetOutfit(Giver g, BasePlayer from, bool clear)
+        {
+            if (clear) g.Outfit = new List<OutfitItem>();
+            else
+            {
+                var worn = from.inventory.containerWear.itemList;
+                if (worn.Count == 0) return "Put on the clothes you want them to wear first (skin them with /skins), then run this again.";
+                g.Outfit = worn.Select(i => new OutfitItem { Item = i.info.shortname, Skin = i.skin }).ToList();
+            }
+            SaveGivers();
+            SpawnGiver(g);
+            return clear ? $"{g.Name} is back to the {(string.IsNullOrEmpty(g.Look) ? _config.DefaultLook : g.Look)} look's outfit."
+                         : $"{g.Name} now wears your outfit ({g.Outfit.Count} items).";
         }
 
         private Giver GiverOf(BaseEntity npc)
@@ -688,6 +729,13 @@ namespace Oxide.Plugins
                     Say(player, $"{g.Name} now uses the {look} look.");
                     return;
                 }
+                case "outfit":
+                {
+                    Giver g = args.Length > 1 ? FindGiver(args[1]) : null;
+                    if (g == null) { Say(player, "Usage: /questgiver outfit <id> (copies what you're wearing, skins included) · /questgiver outfit <id> clear"); return; }
+                    Say(player, SetOutfit(g, player, args.Length > 2 && args[2].ToLowerInvariant() == "clear"));
+                    return;
+                }
                 case "list":
                 {
                     if (_givers.Givers.Count == 0) { Say(player, "No quest givers yet. Use /questgiver add <name>."); return; }
@@ -695,7 +743,7 @@ namespace Oxide.Plugins
                     return;
                 }
                 default:
-                    Say(player, "/questgiver add <name> · move <id> · remove · list · look <id> <look>");
+                    Say(player, "/questgiver add <name> · move <id> · remove · list · look <id> <look> · outfit <id> [clear]");
                     return;
             }
         }
@@ -1900,6 +1948,20 @@ namespace Oxide.Plugins
             SaveGivers();
             SpawnGiver(g);
             arg.ReplyWith($"{g.Name} now uses the {look} look.");
+        }
+
+        /// <summary>sandboxquests.giver.outfit &lt;id&gt; &lt;steamid|name|clear&gt; - dress a giver in what that player wears, or reset it.</summary>
+        [ConsoleCommand("sandboxquests.giver.outfit")]
+        private void CcGiverOutfit(ConsoleSystem.Arg arg)
+        {
+            if (!IsAdminArg(arg)) return;
+            var g = FindGiver(arg.GetString(0));
+            var who = arg.GetString(1);
+            if (g == null || string.IsNullOrEmpty(who)) { arg.ReplyWith("Usage: sandboxquests.giver.outfit <id> <steamid|name|clear>"); return; }
+            if (who.ToLowerInvariant() == "clear") { arg.ReplyWith(SetOutfit(g, null, true)); return; }
+            var p = BasePlayer.Find(who);
+            if (p == null) { arg.ReplyWith($"No online player matches \"{who}\"."); return; }
+            arg.ReplyWith(SetOutfit(g, p, false));
         }
 
         /// <summary>sandboxquests.giver.move &lt;id&gt; &lt;steamid|name&gt; - move a quest giver to where that player stands.</summary>
