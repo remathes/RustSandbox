@@ -1,0 +1,227 @@
+@page "/s/{Id:int}/weather"
+@inherits ServerPageBase
+@inject WeatherService WeatherApi
+@using System.Globalization
+
+<PageTitle>@(Server?.Name ?? "Server") · Weather</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Weather</h1>
+                <p>Random weather that uses Rust's own sky, clouds and fades. Pick how often each kind of weather comes up, or change it right now. Players type <code>/weather</code> in game for the forecast.</p>
+            </div>
+            @if (_status is not null)
+            {
+                <span class="badge good">Plugin v@(_status.Version)</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="LoadAsync" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (Runtime.IsOnline && _status is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The Weather plugin didn't answer. Install it from <a href="s/@Id/telemetry">Telemetry → Weather</a>, then refresh.</div>
+        }
+
+        @if (_status is not null)
+        {
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Right now</h2></div>
+                <div class="panel-body">
+                    <div class="row" style="flex-wrap:wrap;gap:var(--gap);align-items:center">
+                        <div style="font-size:2.4rem;line-height:1">@WeatherService.Emoji(_status.Current)</div>
+                        <div class="grow">
+                            @if (_status.Changing)
+                            {
+                                <b>@WeatherService.Label(_status.Previous) → @WeatherService.Label(_status.Current)</b>
+                                <div class="muted">Changing over (@((int)Math.Round(_status.Blend * 100))%)</div>
+                            }
+                            else
+                            {
+                                <b>@WeatherService.Label(_status.Current)</b>
+                            }
+                            @if (_status.Forced is not null)
+                            {
+                                <div class="muted">Set by hand. Random weather comes back in about @Math.Max(1, Math.Ceiling(_status.ForcedMinutesLeft)) min.</div>
+                            }
+                            else if (_status.Next is not null && _status.Next != _status.Current && _status.NextChangeMinutes >= 0)
+                            {
+                                <div class="muted">Next: @WeatherService.Emoji(_status.Next) @WeatherService.Label(_status.Next) in about @Math.Max(1, Math.Round(_status.NextChangeMinutes)) min</div>
+                            }
+                            else
+                            {
+                                <div class="muted">Staying like this for a while.</div>
+                            }
+                            @if (_status.RainGrace && _status.Forced is null)
+                            {
+                                <div class="muted">Rust holds off rain and storms for a while after a wipe. Changing the weather below ends that early.</div>
+                            }
+                        </div>
+                    </div>
+
+                    <div style="margin-top:var(--gap)">
+                        <div class="muted" style="margin-bottom:.4rem">Change it now, for
+                            <input class="input" type="number" min="1" max="600" style="width:5rem;display:inline-block" value="@_minutes" @onchange="e => _minutes = int.TryParse(e.Value?.ToString(), out var m) ? Math.Clamp(m, 1, 600) : _minutes" />
+                            minutes:</div>
+                        <div class="row" style="flex-wrap:wrap">
+                            @foreach (var kind in WeatherService.Kinds)
+                            {
+                                var k = kind;
+                                <button class="btn @(_status.Forced == k ? "primary" : "")" @onclick="() => NowAsync(k)" disabled="@_busy">@WeatherService.Emoji(k) @WeatherService.Label(k)</button>
+                            }
+                            @if (_status.Forced is not null)
+                            {
+                                <button class="btn ghost" @onclick='() => NowAsync("random")' disabled="@_busy">Back to random</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </section>
+        }
+
+        @if (_configError is not null)
+        {
+            <div class="callout warn">@_configError</div>
+        }
+        else if (_config is not null)
+        {
+            <div class="row" style="margin-bottom:var(--gap);flex-wrap:wrap">
+                <p class="muted" style="margin:0;flex:1">Saving reloads the plugin. A new mix can change the sky straight away.</p>
+                @if (_dirty)
+                {
+                    <button class="btn ghost" @onclick="LoadAsync" disabled="@_busy">Discard</button>
+                }
+                <button class="btn primary" @onclick="SaveAsync" disabled="@(_busy || !_dirty)"><Icon Name="save" /> Save &amp; reload</button>
+            </div>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Settings</h2></div>
+                <div class="panel-body form-grid">
+                    <label class="check wide">
+                        <input type="checkbox" checked="@_config.Enabled" @onchange="e => { _config.Enabled = e.Value is true; _dirty = true; }" />
+                        <span><b>Random weather on</b><small>Off: Rust's own weather, exactly as without the plugin.</small></span>
+                    </label>
+                    <label class="check wide">
+                        <input type="checkbox" checked="@_config.Announce" @onchange="e => { _config.Announce = e.Value is true; _dirty = true; }" />
+                        <span><b>Tell players when the weather turns</b><small>A chat line like "The weather is turning: rain is on the way."</small></span>
+                    </label>
+                </div>
+            </section>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Weather mix</h2></div>
+                <div class="panel-body">
+                    <p class="muted" style="margin-top:0">Rust picks new weather about every 45 minutes of play and fades into it. The mix decides how likely each kind is.</p>
+                    <div class="row" style="flex-wrap:wrap">
+                        @foreach (var (id, name, about) in WeatherService.Mixes)
+                        {
+                            var m = id;
+                            <button class="btn @(_config.Mix == m ? "primary" : "")" title="@about" @onclick="() => SetMix(m)" disabled="@(!_config.Enabled)">@name</button>
+                        }
+                    </div>
+                    <p class="muted">@WeatherService.Mixes.FirstOrDefault(x => x.Id == _config.Mix).About</p>
+
+                    @if (_config.Mix != "Vanilla")
+                    {
+                        var shown = _config.Mix == "Custom" ? _config.Custom : WeatherService.MixOf(_config.Mix);
+                        var total = Math.Max(0.001, shown.Values.Sum());
+                        <div class="form-grid">
+                            @foreach (var kind in WeatherService.Kinds)
+                            {
+                                var k = kind;
+                                var value = shown.GetValueOrDefault(k);
+                                <label class="field">
+                                    <span>@WeatherService.Emoji(k) @WeatherService.Label(k) <span class="muted">(@(Math.Round(value / total * 100))% of the time)</span></span>
+                                    @if (_config.Mix == "Custom")
+                                    {
+                                        <input type="range" min="0" max="100" step="1" value="@value.ToString(CultureInfo.InvariantCulture)" @onchange="e => SetCustom(k, e)" />
+                                    }
+                                    else
+                                    {
+                                        <div class="bar-track" style="height:6px"><div class="bar-fill" style="width:@((value / total * 100).ToString("0", CultureInfo.InvariantCulture))%"></div></div>
+                                    }
+                                </label>
+                            }
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private bool _busy, _loaded, _dirty;
+    private WeatherStatus? _status;
+    private WeatherConfig? _config;
+    private string? _configError;
+    private int _minutes = 20;
+
+    protected override Task OnServerChangedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (Server is null) return;
+        _busy = true;
+        try
+        {
+            _status = await WeatherApi.StatusAsync(Id);
+            (_config, _configError) = await WeatherService.ReadConfigAsync(Server);
+            if (_config is not null) _minutes = _config.ForceMinutes;
+            _dirty = false;
+            _loaded = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private void SetMix(string id)
+    {
+        if (_config is null) return;
+        // Custom starts from the mix that was picked, so it's easy to tweak.
+        if (id == "Custom" && _config.Mix != "Custom" && _config.Mix != "Vanilla") _config.Custom = WeatherService.MixOf(_config.Mix);
+        _config.Mix = id;
+        _dirty = true;
+    }
+
+    private void SetCustom(string kind, ChangeEventArgs e)
+    {
+        if (_config is null) return;
+        if (float.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v)) _config.Custom[kind] = v;
+        _dirty = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Server is null || _config is null) return;
+        _busy = true;
+        try
+        {
+            _config.ForceMinutes = _minutes;
+            var err = await WeatherApi.SaveConfigAsync(Server, _config);
+            if (err is not null) { Toasts.Error(err); return; }
+            Toasts.Success(Runtime.IsOnline ? "Saved. The new weather mix is live." : "Saved. It applies the next time the server starts.");
+        }
+        finally { _busy = false; }
+        await LoadAsync();
+    }
+
+    private async Task NowAsync(string kind)
+    {
+        _busy = true;
+        try
+        {
+            var reply = await WeatherApi.NowAsync(Id, kind, _minutes);
+            if (reply is null) { Toasts.Error("The server didn't answer."); return; }
+            Toasts.Show(reply.Trim().Length > 0 ? reply.Trim() : "Done.");
+            await Task.Delay(1500);
+            _status = await WeatherApi.StatusAsync(Id);
+        }
+        finally { _busy = false; }
+    }
+}

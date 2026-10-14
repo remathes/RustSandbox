@@ -146,12 +146,17 @@ public sealed class ProcessManager(
             return "The server was already running, so a second copy wasn't started — the manager reconnected to it.";
         var exe = LaunchArguments.ExecutablePath(s.Settings);
         if (!File.Exists(exe)) return $"{LaunchArguments.ExecutableName} not found in {s.Settings.InstallDir}. Use \"Install / update server\" first.";
+        if (s.Settings.MapMode == MapMode.CustomMap && CustomMaps.LevelUrl(s.Settings).Length == 0)
+            return "Pick a custom map (or paste a map URL) in Settings → World first.";
 
         var st = Get(s.Id);
         await st.Lock.WaitAsync();
         try
         {
             if (st.IsRunning) return "The server is already running.";
+
+            if (WorldOptions.WriteFile(s.Settings) is { } worldErr) Console(s.Id, worldErr);
+            if (CustomMaps.PlaceForServer(s.Settings) is { } mapErr) Console(s.Id, mapErr);
 
             var psi = new ProcessStartInfo(exe, LaunchArguments.Build(s.Settings))
             {

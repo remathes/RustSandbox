@@ -84,7 +84,7 @@
                             <span>Map</span>
                             <select @bind="_s.MapMode">
                                 <option value="@MapMode.Procedural">Procedural (seed + size)</option>
-                                <option value="@MapMode.CustomMap">Custom map from URL</option>
+                                <option value="@MapMode.CustomMap">Custom map</option>
                                 <option value="@MapMode.Barren">Barren</option>
                                 <option value="@MapMode.HapisIsland">Hapis Island</option>
                                 <option value="@MapMode.CraggyIsland">Craggy Island</option>
@@ -115,7 +115,66 @@
                         }
                         else if (_s.MapMode == MapMode.CustomMap)
                         {
-                            <label class="field wide"><span>Map file URL (.map)</span><input class="input" @bind="_s.LevelUrl" @bind:event="oninput" placeholder="https://…/mymap.map" /><small>Must be a direct download link players can reach.</small></label>
+                            var maps = CustomMaps.List();
+                            var picked = CustomMaps.Find(_s.CustomMapFile);
+                            <div class="field wide">
+                                <span>Map library</span>
+                                <div class="map-lib">
+                                    @foreach (var m in maps)
+                                    {
+                                        var on = string.Equals(m.FileName, _s.CustomMapFile, StringComparison.OrdinalIgnoreCase);
+                                        <div class="map-card @(on ? "on" : "")" @onclick="() => PickMap(m)">
+                                            @if (m.ImagePath is not null)
+                                            {
+                                                <img src="@CustomMaps.DownloadPrefix/@Uri.EscapeDataString(Path.GetFileName(m.ImagePath))" alt="" loading="lazy" />
+                                            }
+                                            else
+                                            {
+                                                <div class="map-noimg"><Icon Name="map" /></div>
+                                            }
+                                            <div class="map-info">
+                                                <b>@m.Title</b>
+                                                <small>@(m.WorldSize > 0 ? $"{m.WorldSize} m · " : "")@((m.Bytes / 1024d / 1024d).ToString("0.#")) MB@(m.Bundled ? " · comes with the app" : "")</small>
+                                                @if (!string.IsNullOrWhiteSpace(m.Description)) { <small class="muted">@m.Description</small> }
+                                            </div>
+                                            @if (!m.Bundled)
+                                            {
+                                                <button class="btn icon ghost" title="Delete this map" @onclick="() => DeleteMap(m)" @onclick:stopPropagation="true"><Icon Name="trash" /></button>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                <div class="row" style="margin-top:8px">
+                                    <label class="btn sm" style="cursor:pointer">
+                                        <Icon Name="plus" /> @(_uploading ? "Uploading…" : "Upload .map file")
+                                        <InputFile OnChange="UploadMapAsync" accept=".map" style="display:none" disabled="@_uploading" />
+                                    </label>
+                                    <small class="muted">Made in RustEdit or downloaded from a map site. Up to 300 MB.</small>
+                                </div>
+                            </div>
+                            @if (picked is null)
+                            {
+                                <label class="field wide"><span>Or a map file URL (.map)</span><input class="input" @bind="_s.LevelUrl" @bind:event="oninput" placeholder="https://…/mymap.map" /><small>Used when no map from the library is picked. Must be a direct download link players can reach.</small></label>
+                            }
+                            else
+                            {
+                                <label class="field">
+                                    <span>Map download address</span>
+                                    <div class="row" style="flex-wrap:nowrap">
+                                        <input class="input" @bind="_s.MapHostUrl" @bind:event="oninput" placeholder="@CustomMaps.DefaultHostUrl" />
+                                        @if (CustomMaps.SuggestHostUrl(_s) is { } sug && sug != _s.MapHostUrl)
+                                        {
+                                            <button class="btn sm ghost" title="@sug" @onclick="() => _s.MapHostUrl = sug">Use @sug</button>
+                                        }
+                                    </div>
+                                    <small>Players download the map from the manager at this address. Blank uses the manager's Public URL (Preferences). For friends outside your network, use your public IP and forward TCP port 5080 like the game port.</small>
+                                </label>
+                                <div class="field">
+                                    <span>Players download from</span>
+                                    <code class="mono" style="word-break:break-all">@CustomMaps.LevelUrl(_s)</code>
+                                    <small>The server itself uses its local copy, so it starts even if this address only works from outside.</small>
+                                </div>
+                            }
                         }
                         <label class="field wide">
                             <span>Live map image (optional)</span>
@@ -124,6 +183,78 @@
                         </label>
                     </div>
                 </section>
+                @if (_s.MapMode == MapMode.Procedural)
+                {
+                    var w = _s.World;
+                    <section class="panel mt">
+                        <div class="panel-head"><h2>World options</h2></div>
+                        <div class="panel-body form-grid">
+                            <label class="check wide">
+                                <input type="checkbox" checked="@w.Enabled" @onchange="e => w.Enabled = e.Value is true" />
+                                <span><b>Customise how the map is generated</b><small>Rust's own generator settings: biome mix, roads, rivers, rails and which monuments spawn. Off: a normal Rust map.</small></span>
+                            </label>
+                            @if (w.Enabled)
+                            {
+                                <div class="callout wide @(WorldOptions.MapExists(_s) ? "warn" : "")">
+                                    Rust only uses these when it builds a new map, so they apply after the next <b>map wipe</b> (Danger zone), or on the next start with a new seed or size.
+                                    @if (WorldOptions.MapExists(_s))
+                                    {
+                                        <span> This seed's map is already built, so a wipe is needed to see changes.</span>
+                                    }
+                                    The map generator preview can't show these changes.
+                                </div>
+
+                                <div class="field wide"><b>Biomes</b><small class="muted">How much of the land each biome covers. The four main ones are scaled to add up to 100%.</small></div>
+                                @Pct("Desert (arid)", w.Arid, v => w.Arid = v, WorldTotal(w))
+                                @Pct("Temperate", w.Temperate, v => w.Temperate = v, WorldTotal(w))
+                                @Pct("Snow (tundra)", w.Tundra, v => w.Tundra = v, WorldTotal(w))
+                                @Pct("Arctic", w.Arctic, v => w.Arctic = v, WorldTotal(w))
+                                <label class="field">
+                                    <span>Jungle: <b>@Math.Round(w.Jungle)%</b> <span class="muted">of the easy ground</span></span>
+                                    <input type="range" min="0" max="100" step="5" value="@Inv(w.Jungle)" @onchange="e => w.Jungle = RangeVal(e, w.Jungle)" />
+                                </label>
+
+                                <div class="field wide"><b>Difficulty zones</b><small class="muted">How much of the map is starter ground (tier 0, where fresh spawns land) versus harder ground with better nodes and monuments. Keep some tier 0, or players have nowhere to spawn.</small></div>
+                                @Pct("Starter (tier 0)", w.Tier0, v => w.Tier0 = Math.Max(5, v), w.Tier0 + w.Tier1 + w.Tier2)
+                                @Pct("Medium (tier 1)", w.Tier1, v => w.Tier1 = v, w.Tier0 + w.Tier1 + w.Tier2)
+                                @Pct("Hard (tier 2)", w.Tier2, v => w.Tier2 = v, w.Tier0 + w.Tier1 + w.Tier2)
+
+                                <div class="field wide"><b>Roads, rivers and rails</b></div>
+                                <label class="check"><input type="checkbox" @bind="w.MainRoads" /><span><b>Ring road and main roads</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.SideRoads" /><span><b>Side roads</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.Trails" /><span><b>Trails</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.Rivers" /><span><b>Rivers</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.Powerlines" /><span><b>Power lines</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.AboveGroundRails" /><span><b>Above-ground railway</b><small>Only on maps of 4250 or bigger.</small></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.BelowGroundRails" /><span><b>Underground train network</b></span></label>
+                                <label class="check"><input type="checkbox" @bind="w.UnderwaterLabs" /><span><b>Underwater labs</b></span></label>
+
+                                <div class="field wide"><b>Monuments</b><small class="muted">Untick anything you don't want on the map. Rust still needs room for the rest, and shrinking a biome or zone can also stop some monuments spawning.</small></div>
+                                @foreach (var group in WorldOptions.Monuments.GroupBy(m => m.Group))
+                                {
+                                    <div class="field wide">
+                                        <span class="muted">@group.Key</span>
+                                        <div class="row" style="flex-wrap:wrap;gap:4px 16px">
+                                            @foreach (var m in group)
+                                            {
+                                                var match = m.Match;
+                                                <label class="check" style="margin:0"><input type="checkbox" checked="@(!w.Blocked.Contains(match))" @onchange="e => SetBlocked(w, match, e.Value is not true)" /><span>@m.Name</span></label>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                                <label class="field wide">
+                                    <span>Other things to keep off the map <span class="muted">(optional)</span></span>
+                                    <input class="input mono" value="@string.Join(", ", w.Blocked.Where(b => !WorldOptions.Monuments.Any(m => m.Match == b)))" @onchange="e => SetOtherBlocked(w, e.Value?.ToString())" placeholder="e.g. electrical_box_, powerline_poles" />
+                                    <small>Parts of prefab names, separated by commas. Anything whose name contains one of these won't spawn.</small>
+                                </label>
+                                <div class="field wide">
+                                    <div class="row"><button class="btn ghost" @onclick="() => _s.World = new WorldOptions { Enabled = true }">Reset to Rust's defaults</button></div>
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
                 break;
 
             case "gameplay":
@@ -341,6 +472,7 @@
         if (!System.Text.RegularExpressions.Regex.IsMatch(_s.Identity ?? "", "^[A-Za-z0-9_-]+$")) return "Identity can only contain letters, numbers, - and _.";
         if (_s.WorldSize is < 1000 or > 6000) return "World size must be between 1000 and 6000.";
         if (_s.Seed < 0) return "Seed must be a positive number.";
+        if (_s.MapMode == MapMode.CustomMap && string.IsNullOrWhiteSpace(_s.CustomMapFile) && string.IsNullOrWhiteSpace(_s.LevelUrl)) return "Pick a custom map from the library, or paste a map URL.";
         var ports = new[] { _s.Port, _s.QueryPort, _s.RconPort }.Concat(_s.AppPort > 0 ? new[] { _s.AppPort } : Array.Empty<int>()).ToList();
         if (ports.Any(p => p is < 1 or > 65535)) return "Ports must be between 1 and 65535.";
         if (ports.Distinct().Count() != ports.Count) return "Game, query, RCON and app ports must all be different.";
@@ -365,6 +497,66 @@
             Toasts.Success("Settings saved.");
         }
         finally { _saving = false; }
+    }
+
+    private bool _uploading;
+
+    private void PickMap(CustomMapInfo m)
+    {
+        if (_s is null) return;
+        _s.CustomMapFile = m.FileName;
+        if (m.WorldSize is >= 1000 and <= 6000) _s.WorldSize = m.WorldSize;
+    }
+
+    private async Task UploadMapAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (!file.Name.EndsWith(".map", StringComparison.OrdinalIgnoreCase)) { Toasts.Error("Pick a .map file."); return; }
+        if (file.Size > CustomMaps.MaxUploadBytes) { Toasts.Error("That map is bigger than 300 MB."); return; }
+        _uploading = true;
+        StateHasChanged();
+        try
+        {
+            await using var stream = file.OpenReadStream(CustomMaps.MaxUploadBytes);
+            var map = await CustomMaps.SaveUploadAsync(file.Name, stream);
+            PickMap(map);
+            Toasts.Success($"Uploaded {map.FileName}. Save changes to use it.");
+        }
+        catch (Exception ex) { Toasts.Error($"Upload failed: {ex.Message}"); }
+        finally { _uploading = false; }
+    }
+
+    private void DeleteMap(CustomMapInfo m)
+    {
+        if (!CustomMaps.Delete(m.FileName)) { Toasts.Error("Couldn't delete that map."); return; }
+        if (_s is not null && string.Equals(_s.CustomMapFile, m.FileName, StringComparison.OrdinalIgnoreCase)) _s.CustomMapFile = "";
+        Toasts.Success($"Deleted {m.FileName}.");
+    }
+
+    private RenderFragment Pct(string label, float value, Action<float> set, float total) =>
+        @<label class="field">
+            <span>@label: <b>@Math.Round(value)</b> <span class="muted">(@(total > 0 ? Math.Round(value / total * 100) : 0)% of the map)</span></span>
+            <input type="range" min="0" max="100" step="5" value="@Inv(value)" @onchange="e => set(RangeVal(e, value))" />
+        </label>;
+
+    private static float WorldTotal(WorldOptions w) => w.Arid + w.Temperate + w.Tundra + w.Arctic;
+
+    private static string Inv(float v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static float RangeVal(ChangeEventArgs e, float fallback) =>
+        float.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? Math.Clamp(v, 0, 100) : fallback;
+
+    private static void SetBlocked(WorldOptions w, string match, bool blocked)
+    {
+        w.Blocked.RemoveAll(b => b == match);
+        if (blocked) w.Blocked.Add(match);
+    }
+
+    private static void SetOtherBlocked(WorldOptions w, string? text)
+    {
+        w.Blocked.RemoveAll(b => !WorldOptions.Monuments.Any(m => m.Match == b));
+        foreach (var part in (text ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            if (!w.Blocked.Contains(part)) w.Blocked.Add(part);
     }
 
     private async Task CopyLaunchAsync()

@@ -19,7 +19,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Daily Rewards", "RustSandbox", "1.1.1")]
+    [Info("Rust Sandbox Daily Rewards", "RustSandbox", "1.1.3")]
     [Description("A daily spin for a random item with rarity tiers, streak bonuses and a spinning reel.")]
     public class RustSandboxDaily : RustPlugin
     {
@@ -379,7 +379,7 @@ namespace Oxide.Plugins
             foreach (var kv in _spins.ToList()) FinishSpin(kv.Key, kv.Value, true);
             foreach (var p in BasePlayer.activePlayerList)
             {
-                CuiHelper.DestroyUi(p, Root);
+                Close(p);
                 CuiHelper.DestroyUi(p, ReminderUi);
             }
             SaveData();
@@ -413,6 +413,7 @@ namespace Oxide.Plugins
             Spin spin;
             if (player != null && _spins.TryGetValue(player.userID, out spin)) FinishSpin(player.userID, spin, true);
             if (player != null) _reminded.Remove(player.userID);
+            if (player != null) _shown.Remove(player.userID);
         }
 
         // Players get the automatic popup once per reward day (not every time they wake up).
@@ -441,6 +442,51 @@ namespace Oxide.Plugins
 
         private const string Root = "SandboxDaily.Root";
         private const string Main = Root + ".Main";
+
+        // Players whose backdrop (the part that frees the mouse) is on screen. Redraws only replace the window inside
+        // it: destroying and re-adding the backdrop made the game grab the mouse and re-centre it on every click.
+        private readonly HashSet<ulong> _shown = new HashSet<ulong>();
+
+        private void Close(BasePlayer player)
+        {
+            if (player == null) return;
+            _shown.Remove(player.userID);
+            CuiHelper.DestroyUi(player, Root);
+        }
+
+
+        // The first draw (the window together with the backdrop that frees the mouse) comes out blurry in game until
+        // the window is drawn again, which is what clicking anything did. So the window is sent once more a moment
+        // after it opens, unless something newer was drawn in the meantime.
+        private readonly Dictionary<ulong, int> _draws = new Dictionary<ulong, int>();
+
+        private void Drawn(BasePlayer player, CuiElementContainer ui, bool fresh, string root, string main)
+        {
+            int n;
+            _draws.TryGetValue(player.userID, out n);
+            _draws[player.userID] = ++n;
+            if (!fresh) return;
+            var again = new CuiElementContainer();
+            again.AddRange(ui.Where(e => e.Name == main || e.Name != root && e.Parent != root));
+            timer.Once(0.2f, () =>
+            {
+                int now;
+                if (player == null || !player.IsConnected || !_draws.TryGetValue(player.userID, out now) || now != n) return;
+                if (!StillOpen(player)) return;
+                CuiHelper.DestroyUi(player, main);
+                CuiHelper.AddUi(player, again);
+            });
+        }
+
+        private bool StillOpen(BasePlayer player) => _shown.Contains(player.userID);
+
+        private void Show(BasePlayer player, CuiElementContainer ui)
+        {
+            var fresh = _shown.Add(player.userID);
+            CuiHelper.DestroyUi(player, fresh ? Root : Main);
+            CuiHelper.AddUi(player, ui);
+            Drawn(player, ui, fresh, Root, Main);
+        }
         private const string Reel = Root + ".Reel";
         private const float SlotPitch = 120f;
         private const float SlotSize = 104f;
@@ -486,7 +532,7 @@ namespace Oxide.Plugins
             Spin spin;
             if (_spins.TryGetValue(player.userID, out spin) && !spin.Done) return; // let the reel finish
             _spins.Remove(player.userID);
-            CuiHelper.DestroyUi(player, Root);
+            Close(player);
             UpdateReminder(player);
         }
 
@@ -599,8 +645,7 @@ namespace Oxide.Plugins
             }
             else Button(ui, Main, Msg("Close", id), 14, "daily.close", "0.3 0.3 0.3 0.95", 260, 30, 380, 74);
 
-            CuiHelper.DestroyUi(player, Root);
-            CuiHelper.AddUi(player, ui);
+            Show(player, ui);
         }
 
         private string StreakLine(PlayerClaim c, string id)
@@ -628,12 +673,13 @@ namespace Oxide.Plugins
         {
             var id = player.UserIDString;
             var ui = new CuiElementContainer();
-            ui.Add(new CuiPanel
-            {
-                Image = { Color = "0 0 0 0.55" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                CursorEnabled = true,
-            }, "Overlay", Root);
+            if (!_shown.Contains(player.userID))
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = "0 0 0 0.55" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                    CursorEnabled = true,
+                }, "Overlay", Root);
             ui.Add(new CuiPanel
             {
                 Image = { Color = "0.10 0.10 0.10 0.98" },
@@ -698,8 +744,7 @@ namespace Oxide.Plugins
 
             var ui = Frame(player, c);
             Label(ui, Main, Msg("Spinning", player.UserIDString), 14, 20, 96, 620, 156, TextAnchor.MiddleCenter);
-            CuiHelper.DestroyUi(player, Root);
-            CuiHelper.AddUi(player, ui);
+            Show(player, ui);
             var id = player.userID;
             spin.Timer = timer.Every(0.05f, () => SpinFrame(player, id, spin));
         }
@@ -779,8 +824,7 @@ namespace Oxide.Plugins
             var ui = Frame(player, c);
             Label(ui, Main, Msg("Won", player.UserIDString, hex, prize.Amount, name, prize.Tier.Name), 16, 20, 96, 620, 156, TextAnchor.MiddleCenter);
             Button(ui, Main, Msg("Close", player.UserIDString), 14, "daily.close", "0.42 0.63 0.24 0.95", 260, 30, 380, 74);
-            CuiHelper.DestroyUi(player, Root);
-            CuiHelper.AddUi(player, ui);
+            Show(player, ui);
             DrawReel(player, spin, spin.To, true);
         }
 

@@ -22,7 +22,9 @@ public static class SeedData
                     Identity = "demo",
                     Description = "A simulated server so you can explore the manager. Add your real server from the sidebar.",
                     Seed = 1337,
-                    WorldSize = 4000,
+                    MapMode = MapMode.CustomMap,
+                    CustomMapFile = Services.CustomMaps.DefaultMap,
+                    WorldSize = 3000,
                     RconPassword = "demo",
                     Tags = "monthly,vanilla,NA",
                 },
@@ -34,6 +36,24 @@ public static class SeedData
                 new ScheduledTask { ServerId = demo.Id, Name = "Nightly restart", Kind = ScheduleKind.Daily, Action = ScheduleAction.Restart, TimeOfDayMinutes = 5 * 60, WarningMinutes = 10, Enabled = false },
                 new ScheduledTask { ServerId = demo.Id, Name = "Discord reminder", Kind = ScheduleKind.Interval, Action = ScheduleAction.Announce, IntervalMinutes = 30, Payload = "Join our Discord: discord.gg/example", Enabled = false },
                 new ScheduledTask { ServerId = demo.Id, Name = "Forced wipe", Kind = ScheduleKind.FirstThursday, Action = ScheduleAction.MapWipe, TimeOfDayMinutes = 13 * 60, WarningMinutes = 15, NewSeedOnWipe = true, Enabled = false });
+            await db.SaveChangesAsync();
+        }
+
+        // Demo servers made before Maui shipped still sit on the old procedural demo map: move them to Maui.
+        if (Services.CustomMaps.Find(Services.CustomMaps.DefaultMap) is not null)
+        {
+            foreach (var old in await db.Servers.Where(x => x.IsDemo).ToListAsync())
+            {
+                var st = old.Settings;
+                if (st.MapMode != MapMode.Procedural || st.Seed != 1337 || st.WorldSize != 4000 || !string.IsNullOrEmpty(st.MapImageUrl)) continue;
+                st.MapMode = MapMode.CustomMap;
+                st.CustomMapFile = Services.CustomMaps.DefaultMap;
+                st.WorldSize = 3000;
+                old.Settings = st;
+                // The simulated history was spread over the old 4000 m map; regenerate it on Maui's land.
+                await db.Kills.Where(k => k.ServerId == old.Id).ExecuteDeleteAsync();
+                await db.Positions.Where(p => p.ServerId == old.Id).ExecuteDeleteAsync();
+            }
             await db.SaveChangesAsync();
         }
 

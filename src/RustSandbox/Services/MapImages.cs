@@ -102,7 +102,16 @@ public static class MapImages
             return new MapImage($"api/servers/{s.Id}/rendered-map?v={f.LastWriteTimeUtc.Ticks}", "rendered:" + f.Name, true);
         if (!string.IsNullOrWhiteSpace(s.Settings.MapImageUrl))
             return new MapImage(s.Settings.MapImageUrl, s.Settings.MapImageUrl, false);
+        if (CustomMapImageUrl(s) is { } custom)
+            return new MapImage(custom, "custom:" + custom, false);
         return null;
+    }
+
+    /// <summary>The picture that came with a hosted custom map (Name.jpg/.png next to it), drawn Rust-style with a 500 px ocean border.</summary>
+    public static string? CustomMapImageUrl(ServerInstance s)
+    {
+        if (s.Settings.MapMode != MapMode.CustomMap || CustomMaps.Find(s.Settings.CustomMapFile) is not { ImagePath: { } img } map) return null;
+        return $"{CustomMaps.DownloadPrefix}/{Uri.EscapeDataString(Path.GetFileName(img))}?v={File.GetLastWriteTimeUtc(img).Ticks:x}";
     }
 
     /// <summary>The hand-tuned ocean border for this image, or null to work it out automatically.</summary>

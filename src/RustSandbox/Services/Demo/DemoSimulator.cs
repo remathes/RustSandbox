@@ -84,7 +84,7 @@ public sealed class DemoSimulator(
 
     private async Task TickAsync(ServerInstance server, double seconds, CancellationToken ct)
     {
-        var s = world.GetState(server.Id, server.Settings.WorldSize);
+        var s = world.GetState(server);
         var batch = new TelemetryBatch { Kills = new(), Positions = new(), Connections = new(), Usage = new(), Gather = new() };
         string? chat = null, logLine = null;
 
@@ -190,7 +190,7 @@ public sealed class DemoSimulator(
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         if (await db.Gathering.AnyAsync(g => g.ServerId == server.Id, ct)) return;
 
-        var s = world.GetState(server.Id, server.Settings.WorldSize);
+        var s = world.GetState(server);
         var rows = new Dictionary<(string, string, string, DateTime), GatherStat>();
         lock (s.Lock)
         {
@@ -225,7 +225,7 @@ public sealed class DemoSimulator(
         if (await db.Kills.AnyAsync(k => k.ServerId == server.Id, ct)) return;
 
         log.LogInformation("Generating demo history for {Name}", server.Name);
-        var s = world.GetState(server.Id, server.Settings.WorldSize);
+        var s = world.GetState(server);
         var start = DateTime.UtcNow.AddDays(-3);
         var kills = new List<KillEvent>();
         var positions = new List<PositionSample>();

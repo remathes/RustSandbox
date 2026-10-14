@@ -137,6 +137,10 @@
         {
             <div class="fleet-map" title="@s.Settings.MapDisplayName"><img src="@s.Settings.MapImageUrl" alt="" loading="lazy" /></div>
         }
+        else if (MapImages.CustomMapImageUrl(s) is { } customImg)
+        {
+            <div class="fleet-map" title="@s.Settings.MapDisplayName"><img src="@customImg" alt="" loading="lazy" /></div>
+        }
         else if (s.Settings.MapMode == MapMode.Procedural)
         {
             <div class="fleet-map" title="Preview of @s.Settings.MapDisplayName (approximate until the server renders its map)">
@@ -150,7 +154,7 @@
         if (_servers is null) return;
         foreach (var s in _servers)
         {
-            if (!_canvases.TryGetValue(s.Id, out var canvas) || MapImages.FindRendered(s) is not null || !string.IsNullOrWhiteSpace(s.Settings.MapImageUrl)) continue;
+            if (!_canvases.TryGetValue(s.Id, out var canvas) || MapImages.FindRendered(s) is not null || !string.IsNullOrWhiteSpace(s.Settings.MapImageUrl) || MapImages.CustomMapImageUrl(s) is not null) continue;
             var key = $"{s.Settings.Seed}:{s.Settings.WorldSize}";
             if (_drawn.TryGetValue(s.Id, out var done) && done == key) continue;
             _drawn[s.Id] = key;

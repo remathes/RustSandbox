@@ -16,7 +16,7 @@
             @if (_tab == "installed")
             {
                 <input class="input" style="max-width:220px" placeholder="Filter" @bind="_filter" @bind:event="oninput" />
-                <button class="btn" @onclick="CheckUpdatesAsync" disabled="@_busy">@(_checking ? "Checking uMod…" : "Check for updates")</button>
+                <button class="btn" @onclick="CheckUpdatesAsync" disabled="@_busy">@(_checking ? "Checking…" : "Check for updates")</button>
                 @if (_updates > 0)
                 {
                     <button class="btn primary" @onclick="UpdateAllAsync" disabled="@_busy"><Icon Name="download" /> Update all (@_updates)</button>
@@ -41,6 +41,7 @@
         <div class="tabs" role="tablist">
             <button role="tab" class="@(_tab == "installed" ? "on" : "")" @onclick='() => _tab = "installed"'>Installed (@_list.Count)</button>
             <button role="tab" class="@(_tab == "umod" ? "on" : "")" @onclick='() => _tab = "umod"'>Get plugins from uMod</button>
+            <button role="tab" class="@(_tab == "perf" ? "on" : "")" @onclick='OpenPerfAsync'>Performance</button>
         </div>
 
         @if (_tab == "installed")
@@ -148,6 +149,155 @@
                 }
             </div>
         }
+        else if (_tab == "perf")
+        {
+            var info = Runtime.Info;
+            var rows = _usage?.Plugins ?? new();
+            var measured = rows.Where(p => p.Percent is not null).ToList();
+            var all = measured.Sum(p => p.Percent!.Value);
+            var ours = measured.Where(p => p.Ours).Sum(p => p.Percent!.Value);
+            var top = measured.OrderByDescending(p => p.Percent).FirstOrDefault();
+            var maxPct = Math.Max(0.5, measured.Count == 0 ? 0 : measured.Max(p => p.Percent!.Value));
+            var maxTotal = Math.Max(0.001, rows.Count == 0 ? 0 : rows.Max(p => p.TotalSeconds));
+            <div class="stack">
+                <div class="gauges">
+                    <div class="gauge">
+                        <div class="val @UsageClass(measured.Count == 0 ? null : all, 5, 15)">@(measured.Count == 0 ? "…" : Pct(all))</div>
+                        <div class="lbl">server time in plugins</div>
+                        <div class="foot">@(measured.Count == 0 ? "measuring, give it 10 seconds" : $"over the last {Fmt.Duration(TimeSpan.FromSeconds(_usage!.WindowSeconds))}")</div>
+                    </div>
+                    <div class="gauge">
+                        <div class="val">@(measured.Count == 0 ? "…" : Pct(ours))</div>
+                        <div class="lbl">Rust Sandbox plugins</div>
+                        <div class="foot">@rows.Count(p => p.Ours) of @rows.Count loaded plugins</div>
+                    </div>
+                    <div class="gauge">
+                        <div class="val ellipsis" style="font-size:20px">@(top is null ? "…" : top.Title)</div>
+                        <div class="lbl">busiest plugin</div>
+                        <div class="foot">@(top is null ? "" : Pct(top.Percent!.Value) + " of server time")</div>
+                    </div>
+                    <div class="gauge">
+                        <div class="val">@(info?.Framerate.ToString("0") ?? "—")</div>
+                        <div class="lbl">server FPS</div>
+                        <div class="foot">@(info is null ? "" : info.Framerate >= 30 ? "healthy" : info.Framerate >= 15 ? "a bit low" : "struggling")</div>
+                    </div>
+                </div>
+
+                @if (_usage?.Error is { } err)
+                {
+                    <div class="callout warn">@err</div>
+                }
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Plugin usage</h2>
+                        <span class="spacer"></span>
+                        <span class="muted" style="font-size:12.5px">Refreshes every 10 s while this tab is open</span>
+                        <button class="btn sm ghost" @onclick="RefreshUsageAsync" disabled="@_usageLoading">Refresh</button>
+                    </div>
+                    <div class="panel-body flush table-wrap">
+                        @if (_usage is null)
+                        {
+                            <div class="empty">Reading plugin timings…</div>
+                        }
+                        else if (rows.Count == 0)
+                        {
+                            <div class="empty">No plugin timings to show.</div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead><tr><th>Plugin</th><th style="width:34%">Share of server time</th><th class="r">Since it loaded</th><th class="r">Memory</th></tr></thead>
+                                <tbody>
+                                    @foreach (var p in rows)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <b>@p.Title</b> <span class="muted num" style="font-size:12.5px">@p.Version</span>
+                                                @if (p.Ours)
+                                                {
+                                                    <span class="badge" style="margin-left:6px">ours</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (p.Percent is { } pct)
+                                                {
+                                                    <div class="row" style="flex-wrap:nowrap;gap:10px">
+                                                        <div class="bar-track" style="flex:1;min-width:60px"><div class="bar-fill" style="width:@((Math.Min(100, pct / maxPct * 100)).ToString("0", CultureInfo.InvariantCulture))%;@BarColor(pct)"></div></div>
+                                                        <span class="num nowrap @UsageClass(pct, 1, 3)" style="min-width:58px;text-align:right">@Pct(pct)</span>
+                                                    </div>
+                                                }
+                                                else if (p.Reloaded)
+                                                {
+                                                    <span class="muted">reloaded just now, measuring again</span>
+                                                }
+                                                else
+                                                {
+                                                    <div class="bar-track" style="opacity:.5"><div class="bar-fill" style="width:@((p.TotalSeconds / maxTotal * 100).ToString("0", CultureInfo.InvariantCulture))%"></div></div>
+                                                }
+                                            </td>
+                                            <td class="r num nowrap">@Secs(p.TotalSeconds)</td>
+                                            <td class="r num nowrap muted">@(p.Memory ?? "—")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Slow hook warnings</h2></div>
+                    <div class="panel-body flush table-wrap">
+                        @if (_usage is { LogsReadable: false })
+                        {
+                            <div class="empty">The manager can only read Oxide's log on servers it runs on this machine. On other hosts, look in oxide/logs for lines with "took".</div>
+                        }
+                        else if (_usage is null || _usage.SlowHooks.Count == 0)
+                        {
+                            <div class="empty">None in the last two log files. Oxide writes a warning whenever a single plugin call takes more than 100 ms.</div>
+                        }
+                        else
+                        {
+                            <table class="table">
+                                <thead><tr><th>Plugin</th><th>Hook</th><th class="r">Times</th><th class="r">Worst</th><th>Last seen</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var h in _usage.SlowHooks)
+                                    {
+                                        <tr>
+                                            <td><b>@h.Plugin</b></td>
+                                            <td class="mono" style="font-size:12.5px">@h.Hook</td>
+                                            <td class="r num">@h.Count</td>
+                                            <td class="r num">@h.MaxMs.ToString("0") ms</td>
+                                            <td class="nowrap muted">@h.Last</td>
+                                            <td>
+                                                @if (h.Startup)
+                                                {
+                                                    <span class="badge" title="Only runs while the plugin loads, so players don't feel it">startup only</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge warn" title="Runs during play: each one is a hitch players can feel">during play</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Reading these numbers</h2></div>
+                    <div class="panel-body stack" style="gap:8px;font-size:13.5px">
+                        <p style="margin:0"><b>Share of server time</b> is how much of the server's main thread went to that plugin's hooks, from Oxide's own timer, compared over the last few minutes. Under 1% per plugin is light; a few percent is worth a look if the server FPS drops; 10% or more for one plugin is heavy.</p>
+                        <p style="margin:0"><b>Since it loaded</b> is Oxide's running total. It restarts when a plugin reloads, so a plugin you just reloaded looks small.</p>
+                        <p class="muted" style="margin:0">The same figures are in the Console: <span class="mono">@(PluginService.Prefix(Server.Settings))plugins</span> lists each plugin with its total hook time. Numbers grow with players online, so check while people are playing.</p>
+                    </div>
+                </section>
+            </div>
+        }
         else
         {
             <section class="panel">
@@ -220,6 +370,9 @@
     private string _query = "", _lastQuery = "";
     private List<UmodPlugin>? _results;
     private string? _searchError;
+    private PluginUsageReport? _usage;
+    private bool _usageLoading;
+    private Timer? _usageTimer;
 
     protected override async Task OnServerChangedAsync()
     {
@@ -228,6 +381,43 @@
     }
 
     protected override Task OnLiveRefreshAsync() => Task.CompletedTask; // list refreshes after actions
+
+    private async Task OpenPerfAsync()
+    {
+        _tab = "perf";
+        _usageTimer ??= new Timer(_ => _ = InvokeAsync(async () =>
+        {
+            if (_tab != "perf") return;
+            await RefreshUsageAsync();
+            StateHasChanged();
+        }), null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        await RefreshUsageAsync();
+    }
+
+    private async Task RefreshUsageAsync()
+    {
+        if (_usageLoading || Server is null) return;
+        _usageLoading = true;
+        try { _usage = await Plugins.UsageAsync(Server); }
+        catch (Exception ex) { _usage = new PluginUsageReport { Error = $"Couldn't read plugin timings: {ex.Message}" }; }
+        finally { _usageLoading = false; }
+    }
+
+    public override void Dispose()
+    {
+        _usageTimer?.Dispose();
+        base.Dispose();
+    }
+
+    private static string Pct(double v) => v < 0.1 ? "<0.1%" : v.ToString(v < 10 ? "0.0" : "0", CultureInfo.InvariantCulture) + "%";
+
+    private static string Secs(double s) => s < 1 ? (s * 1000).ToString("0", CultureInfo.InvariantCulture) + " ms"
+        : s < 120 ? s.ToString("0.0", CultureInfo.InvariantCulture) + " s"
+        : Fmt.Duration(TimeSpan.FromSeconds(s));
+
+    private static string UsageClass(double? v, double warn, double bad) => v is null ? "" : v >= bad ? "bad" : v >= warn ? "warn" : "";
+
+    private static string BarColor(double pct) => pct >= 3 ? "background:var(--signal)" : pct >= 1 ? "background:var(--hazard)" : "";
 
     private async Task LoadAsync()
     {
@@ -331,7 +521,7 @@
         try
         {
             _updates = await Plugins.CheckUpdatesAsync(_list);
-            Toasts.Show(_updates == 0 ? "All plugins are up to date (or not listed on uMod)." : $"{_updates} plugin update(s) available.");
+            Toasts.Show(_updates == 0 ? "All plugins are up to date. Rust Sandbox plugins are checked against this manager, the rest against uMod (ones not on uMod can't be checked)." : $"{_updates} plugin update(s) available.");
         }
         catch (Exception ex) { Toasts.Error($"Couldn't reach uMod: {ex.Message}"); }
         finally { _busy = _checking = false; }

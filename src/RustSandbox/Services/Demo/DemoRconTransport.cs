@@ -117,7 +117,7 @@ public sealed class DemoRconTransport(DemoWorld world, int serverId) : IRconTran
                 case "oxide.plugins":
                 case "o.plugins":
                 case "plugins":
-                    return "Listing 6 plugins:\n  01 \"Rust Sandbox Telemetry\" (1.2.0) by RustSandbox (0.12s) - RustSandboxTelemetry.cs\n  02 \"Better Chat\" (5.2.11) by LaserHydra (0.02s) - BetterChat.cs\n  03 \"Gather Manager\" (2.2.78) by Mughisi (0.01s) - GatherManager.cs\n  04 \"Kits\" (4.4.2) by k1lly0u (0.05s) - Kits.cs\n  05 \"NTeleportation\" (1.8.4) by nivex (0.08s) - NTeleportation.cs\n  06 \"Remover Tool\" (4.3.41) by Tryhard (0.03s) - RemoverTool.cs";
+                    return DemoPluginList();
 
                 case "env.time":
                     return arg.Length > 0 ? $"env.time: \"{arg}\"" : "env.time: \"13.42\"";
@@ -210,6 +210,31 @@ public sealed class DemoRconTransport(DemoWorld world, int serverId) : IRconTran
             default:
                 return "Syntax: oxide.show groups | perms | group <name> | user <id>";
         }
+    }
+
+    private static readonly DateTime DemoPluginsLoaded = DateTime.UtcNow.AddMinutes(-90);
+
+    // Hook totals grow with uptime (seconds of hook time per second of server time) so the Plugins page's
+    // Performance tab has live numbers to show.
+    private static string DemoPluginList()
+    {
+        var up = (DateTime.UtcNow - DemoPluginsLoaded).TotalSeconds;
+        var rows = new (string Title, string Ver, string Author, double Rate, string Mem, string File)[]
+        {
+            ("Rust Sandbox Telemetry", "1.2.0", "RustSandbox", 0.0094, "1.8 MB", "RustSandboxTelemetry"),
+            ("Better Chat", "5.2.11", "LaserHydra", 0.0018, "412 KB", "BetterChat"),
+            ("Gather Manager", "2.2.78", "Mughisi", 0.0041, "96 KB", "GatherManager"),
+            ("Kits", "4.4.2", "k1lly0u", 0.0009, "2.4 MB", "Kits"),
+            ("NTeleportation", "1.8.4", "nivex", 0.0032, "3.1 MB", "NTeleportation"),
+            ("Remover Tool", "4.3.41", "Tryhard", 0.0014, "640 KB", "RemoverTool"),
+        };
+        var sb = new System.Text.StringBuilder($"Listing {rows.Length} plugins:");
+        for (var i = 0; i < rows.Length; i++)
+        {
+            var r = rows[i];
+            sb.Append(FormattableString.Invariant($"\n  {i + 1:00} \"{r.Title}\" ({r.Ver}) by {r.Author} ({r.Rate * up:0.000}s / {r.Mem}) - {r.File}.cs"));
+        }
+        return sb.ToString();
     }
 
     public ValueTask DisposeAsync()

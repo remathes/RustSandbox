@@ -29,6 +29,10 @@ public sealed class DemoServerState
     public Random Rng { get; init; } = new();
     public List<SimPlayer> Players { get; } = new();
     public List<(float X, float Z)> Hotspots { get; } = new();
+    /// <summary>How far players wander around a hotspot. Small on custom maps, whose hotspots are known dry land.</summary>
+    public int Spread { get; set; } = 180;
+    /// <summary>The custom map the hotspots came from ("" = random hotspots).</summary>
+    public string SpotsFrom { get; set; } = "";
     public DateTime StartedUtc { get; init; } = DateTime.UtcNow;
     public int Entities { get; set; } = 180_000;
     public object Lock { get; } = new();
@@ -109,10 +113,37 @@ public sealed class DemoWorld
     public static readonly string[] Traps = { "Auto Turret", "Shotgun Trap", "Flame Turret", "Landmine", "Bear Trap", "SAM Site" };
     public static readonly string[] BodyParts = { "Head", "Chest", "Chest", "Chest", "Stomach", "Stomach", "Arm", "Arm", "Leg", "Leg", "Hand", "Foot" };
 
-    public DemoServerState GetState(int serverId, int worldSize = 4000)
+    public DemoServerState GetState(int serverId, int? worldSize = null)
     {
-        var state = _states.GetOrAdd(serverId, id => Create(id, worldSize));
-        state.WorldSize = worldSize;
+        var state = _states.GetOrAdd(serverId, id => Create(id, worldSize ?? 4000));
+        if (worldSize is { } size) state.WorldSize = size;
+        return state;
+    }
+
+    /// <summary>The server's state, with players kept on dry land when it runs a custom map that lists land spots (e.g. Maui).</summary>
+    public DemoServerState GetState(ServerInstance server)
+    {
+        var st = server.Settings;
+        var state = GetState(server.Id, st.WorldSize);
+        var mapFile = st.MapMode == MapMode.CustomMap ? st.CustomMapFile ?? "" : "";
+        if (state.SpotsFrom == mapFile) return state;
+        lock (state.Lock)
+        {
+            var map = CustomMaps.Find(mapFile);
+            var spots = map is null ? null : CustomMaps.Details(map)?.LandSpots.Where(a => a.Length >= 2).Select(a => (a[0], a[1])).ToList();
+            state.SpotsFrom = mapFile;
+            if (spots is not { Count: > 0 }) return state;
+            state.Hotspots.Clear();
+            state.Hotspots.AddRange(spots);
+            state.Spread = 60;
+            var rng = state.Rng;
+            foreach (var p in state.Players)
+            {
+                var spot = spots[rng.Next(spots.Count)];
+                p.X = p.TargetX = spot.Item1 + rng.Next(-40, 40);
+                p.Z = p.TargetZ = spot.Item2 + rng.Next(-40, 40);
+            }
+        }
         return state;
     }
 
@@ -239,7 +270,7 @@ public sealed class DemoWorld
         {
             PlayerKiller(killer);
             k.VictimType = ActorType.Animal; k.VictimName = AnimalVictims[rng.Next(AnimalVictims.Length)];
-            k.VictimX = Clamp(killer.X + rng.Next(-150, 150), s.WorldSize); k.VictimZ = Clamp(killer.Z + rng.Next(-150, 150), s.WorldSize);
+            k.VictimX = Clamp(killer.X + rng.Next(-s.Spread * 5 / 6, s.Spread * 5 / 6), s.WorldSize); k.VictimZ = Clamp(killer.Z + rng.Next(-s.Spread * 5 / 6, s.Spread * 5 / 6), s.WorldSize);
             Shot(killer, false);
         }
         else if (roll < 0.81)
@@ -282,7 +313,7 @@ public sealed class DemoWorld
         {
             PlayerKiller(killer);
             k.VictimType = ActorType.Helicopter; k.VictimName = "Patrol Helicopter";
-            k.VictimX = Clamp(killer.X + rng.Next(-120, 120), s.WorldSize); k.VictimZ = Clamp(killer.Z + rng.Next(-120, 120), s.WorldSize);
+            k.VictimX = Clamp(killer.X + rng.Next(-s.Spread * 2 / 3, s.Spread * 2 / 3), s.WorldSize); k.VictimZ = Clamp(killer.Z + rng.Next(-s.Spread * 2 / 3, s.Spread * 2 / 3), s.WorldSize);
             k.Weapon = rng.NextDouble() < 0.7 ? "Assault Rifle" : "M249"; k.Distance = (float)Math.Round(60 + rng.NextDouble() * 140, 1);
             k.KillerX = killer.X; k.KillerZ = killer.Z;
         }
@@ -315,8 +346,8 @@ public sealed class DemoWorld
             if (dist < 15 || rng.NextDouble() < 0.01)
             {
                 var spot = s.Hotspots[rng.Next(s.Hotspots.Count)];
-                p.TargetX = Clamp(spot.X + rng.Next(-180, 180), s.WorldSize);
-                p.TargetZ = Clamp(spot.Z + rng.Next(-180, 180), s.WorldSize);
+                p.TargetX = Clamp(spot.X + rng.Next(-s.Spread, s.Spread), s.WorldSize);
+                p.TargetZ = Clamp(spot.Z + rng.Next(-s.Spread, s.Spread), s.WorldSize);
                 continue;
             }
             var speed = MathF.Min(dist, (float)(4 + rng.NextDouble() * 4) * (float)seconds); // ~walking/running pace

@@ -19,7 +19,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Event HUD", "RustSandbox", "1.3.1")]
+    [Info("Rust Sandbox Event HUD", "RustSandbox", "1.4.1")]
     [Description("Shows active server events, locked crate timers and a radiation detector on every player's HUD, and announces events in chat.")]
     public class RustSandboxEventHud : RustPlugin
     {
@@ -46,7 +46,8 @@ namespace Oxide.Plugins
                 ["SmallOilRig"] = true,
                 ["LargeOilRig"] = true,
             };
-            [JsonProperty("Show untouched oil rig crates in the list")] public bool ShowIdleRigCrates = false;
+            // Renamed in 1.3.3 so existing configs (where it was off) pick up the new default.
+            [JsonProperty("Show oil rig crates before anyone hacks them")] public bool ShowIdleRigCrates = true;
             [JsonProperty("Keep looted entries in the list for (seconds)")] public float LootedLinger = 60f;
             [JsonProperty("Active color")] public string ActiveColor = "0.18 0.62 0.25 0.9";
             [JsonProperty("Inactive color")] public string InactiveColor = "0.62 0.13 0.13 0.75";
@@ -62,6 +63,7 @@ namespace Oxide.Plugins
             [JsonProperty("Radiation detection range (meters)")] public float RadiationRange = 60f;
             [JsonProperty("Compass (direction you're facing)")] public bool Compass = true;
             [JsonProperty("Coordinates (grid square and x, y, z)")] public bool Coordinates = true;
+            [JsonProperty("Pet buffs next to the coordinates (roar, guard, pet down)")] public bool PetBuffs = true;
             [JsonProperty("Player HUD default position (AboveHotbar, TopLeft, TopRight, MiddleLeft, MiddleRight, BottomLeft, BottomRight)")] public string InfoPosition = "AboveHotbar";
             [JsonProperty("Player HUD default nudge X (pixels, + moves right)")] public float InfoX = 0f;
             [JsonProperty("Player HUD default nudge Y (pixels, + moves up)")] public float InfoY = 0f;
@@ -177,6 +179,9 @@ namespace Oxide.Plugins
                 ["EdInfo"] = "Radiation, compass, grid",
                 ["EdAboveHotbar"] = "Above hotbar",
                 ["LabelGrid"] = "X, Y, Z",
+                ["LabelBuffRoar"] = "ROAR",
+                ["LabelBuffGuard"] = "GUARD",
+                ["LabelPetDown"] = "PET DOWN",
                 ["EdHint"] = "Pick a corner, then nudge it. The yellow box shows where it goes.",
                 ["EdTopLeft"] = "Top left",
                 ["EdTopRight"] = "Top right",
@@ -199,6 +204,8 @@ namespace Oxide.Plugins
                 ["SrcSmallRig"] = "Small Oil Rig",
                 ["SrcChinook"] = "Chinook drop",
                 ["SrcOther"] = "monument",
+                ["SrcDeepSea"] = "Ghost ship",
+                ["GridDeepSea"] = "Deep Sea",
                 ["LabelAirdrop"] = "AIR",
                 ["LabelHeli"] = "HELI",
                 ["LabelBradley"] = "APC",
@@ -218,6 +225,8 @@ namespace Oxide.Plugins
                 ["LineLanded"] = "landed",
                 ["LineBurning"] = "burning",
                 ["LineReady"] = "{0} to loot",
+                ["LineCountWaiting"] = "{0} waiting",
+                ["LineCountUnlocked"] = "{0} unlocked",
                 ["LineAirdrop"] = "Airdrop",
                 ["LineHeliLoot"] = "Heli crates",
                 ["LineBradleyLoot"] = "Bradley crates",
@@ -259,6 +268,9 @@ namespace Oxide.Plugins
         // so they work without any web host or image plugin.
         private static readonly Dictionary<string, string> IconData = new Dictionary<string, string>
         {
+            ["buff_roar"] = "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",
+            ["buff_guard"] = "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",
+            ["pet_down"] = "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",
             ["chinook"] = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAE0UlEQVR42u2Zy4scVRTGf6e6RhNxzEw07gRFF24imgcovjaKIuhKXAgREYJL9Q8IwSzcZCO6kQH/AKMgCkp0b4wElYxgCAnGlYvEpDOZBJNMV38u5ly4llXdVf2oaZ36oKnqvtX3nnPq3O88LrRo0aJFixYtWrTYnLBZE0hSYzKZmTat8r5eYn6TbpTOZpblhFoENEXvDHNnZnbFZuTNJ0AHeB94BegDyYS2eH6efvR51yR1gDeBHVO2fP4tJMBJM/vcjbAAdBu2/RmTdAA4tIEO8JiZHXcveA3YB2TuEeMgAa4CTwJ3RF51ErgI9IBDSNonqaeNwQVJD0oyN8Ckt9arkq65fn2/v/tfYVDSLmDBXbOOhVeAmz6PgFuA+Rpb4JyZnZNkZibfjuOGpjkzuyHpDeBj/y141GngYWAtyJH64j+NaOFngIfcnVLgrJl9WTf0hXicjwgjyJO68nuBD93tY/xqZtcldf6xlqREUqfi51b/z3MFLv1BeKbiXMkE3T31615Jl1yezK9rfn1rrLDvLoqknZL+9L11wz83JT0VP9dgGO0MUD7cZ5IeH1k+95JE0nZJyz5xIBdJ6kra3nRGV0H5IN9lSTvy8qVV92lEXl8BOyNiCddjwGV3r6whI3TMrCfpPuAbYLEgiQq5zW9AN+acygZY5yfrS1oCHo1Ij4i1vzazfgHxTBM9T52PuPJF+UMwyLIbK7y0agYIoUnSQWC//zn+X5jwlAuTNGQEA7YBnwB7KiRPPxZVwGmFV5858x8F/gDeA+6MJgufzxou4wVsAba6wTsD8pU+8HPOY6t7gMfWe4ADnjDlLZm4C24EBr35kHBd8SSIvHemFZTPJO0Hlipkd2VNFg1pwowz3qlQ+p4pIsCBBoiUf9aVz0rKy7xbrriVw/c54PZIoGmOU0KAx5wAUyfwynG/I+mEx9JBBVOcC9wraVHSXX59MXpumuNZgVxB5tfLMsC0tFW0HvZ2A7vc0lWyJwEXzWw1mmulwfEiAux5CUxRdEqHMOfT0SRV8/Ytkv7yuXteITY5nt//XU+CKKo0h0WBuswuoGtmvbDXJK02OJ7f/x3gFLAavLquAXo1DTAHvOBChQTpkYbGy1Lvnm/nQg8eZoCqbh8Wnwe+GPDcNMdtFB2GGWBthA5Nf4gQ0x4v0qG2AYLS3w+J/aN4zbTHYx0E/JAj9kqT9b2cPQ78PsDys4ywJY4Mkj8pKYAEJGZ2DTjsz2X/IeXXnCQ/NbNfPKvt1yGOfDq85KVwL9oSs3awGlw+82hxAngeuMz6EZxGMYBFzZCPWD9BKiOjUBY31QvIrxV783fAS2Z2qSz+12pbhxgq6WVJ30q6qtlDz3uV70iaCyl9VaKoVBwFS3pv4IEcux4GdgNvA8tRojJJlK2VeLPmdCSjTfz836tDKxk76m9iTwOd4NK1pPXDnqpz1TogCKcp7lrmBBksHarFrTn3mwhZVlgrnC7VSt/TEYXpOzdsAzqS+tFc837U3QFW6go0gIcaWauSMH5dkHTWT4guSLruRNSVdN5/fyLqLM/kWumYhHR/we8L0f1tEyS/qaw1jgHWvDKbj5oPoU8XenHnyxoRM7zW5oKNyQfDEg1NKhY3uVaLFi1atGjRokWLFi1a/O/xN2I6zTiGXhagAAAAAElFTkSuQmCC",
             ["crate"] = "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",
             ["heli"] = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAFbUlEQVR42u2ZT4hVVRzHP7/33jilOOkUElLaHzFKMSOnaKHg7PoDURG2kwZm06pcRS1atAmCFlGbiGgR1aJNRCIUiBZtKrQgQrEQTInMRnGcnJl377dFv6s/L/e9ue/PPGW8Xzjc884995zz+53f/wcVKlSoUKFChQrXKSw/IKleNL5kCDZrtnwpya5bCZBkZiZJTwNbgBSoLRE65c8zZvZOpLeRib2ZJZJ2AZ8u5RuXtMHMXvTLTRo5SVg34PNk+jhIu7Mx/mhkhsH1/y1gDfDgIqqAuUjeAdzpY1PA4UGoAPCC99OrLYqv6DK+ulrnaLRwg+rTTVvBTdRd9IfjOSTVXOIW82YMSM1MLRlgZkmXN2pOQCbiV2wU5jXCvEvDZpZKwszSPklYkU1R/kyNPmxUA2oeYCS5d6ty08+b2ay/m1nkgEddqUCnN+4Sk0paDmwFxoEHgNuBDbnP/pR0EvjG5yiTmH6rgKQbgBvjHv483zYa7ODWs/4mSW9I+k2do+nPgzkb1MvZstjmVUn/SDrtzzP+3N7TPtmHkkYkvSYpbUHcnKTE32ctcaLnvS9/zkn6RNLGXpkQGLCnxbnG4x6NThf3mGEM+MiDir+AA8AvLmLrgUeAe4Llt1bJl4t9DXgOeEzSS2b2QbZXDz7/+8wYB9Wqde3hMrGXtM3FSS4BawrmDkt6PsxLS6jDfOhP+jrLJNUl1comakFCx4OExefOjqUsEL/FdUqSJuKmkhre6mH8IUl/B1VYCEmwC7uLDK8z49JeeQYFBuwIatc7AyQNSdrvi7wfbshaHHTY+7tzBq8ME1JJFyQ96ze5TtLqMp4pMOdWSVNBAgsZYGVEyjPFJ4AvgAvANuCo+9t0gcCoAfzkNqFsfqHc2WaAWeAYMO3rnQN+9jziGDBtZlO5M5wBRn09+d7jZrY/o6sTIzjhi0wDf3jkZu0CEf2fdM9KOu4MKGuALBgwA5Z7G/P3O3PzZ4BZSRmDDgP/Aity63UWCHnRIJG00jc3Dy5WhkiuHVHmTBpt4wXaMaGe2yPN/baSDGqJsunuELDS+yPApIt+ow3zhjxK3N6H9NoCQ+q+b8P7tSDiibdmqDX0hQEpMOf9BNgjaczM5oIHqEdvYGbzkkaBtwdQWssYVAvNyoTVtYUSCneB54BfA6dvAvZJetTMEjNr+jPrNyVtAvYB9/exuNLqppNgLzJG1EMAFFvH2WDNCfoY2BEMyiiw14sZe90im5fVdgK7gGU9EJ+GG4yEEWwDRcYQ+B04C6wF7s1ddqOwKlwirx4BDnkpa6HwNhLRLfG1NgSWcoeS1gbvk53zsJlNZVXh0uGle4NngM9c5DI9S4KPjWLabaEz8W9/9LR5QX/fKnjrV3ElH2NPhuiqqf4iC5ffKxHxtQ2JQwRbzzXrhQmNwIT5kMT0wogkrHFR0rvh8G0JvFrV3IwJD0v6us1Npm3G8zWBDB9KWu2EXrv/SuUyvglJ37VIe5NcK8IRL5F/6d9PREZfy0zI69uTkmYkTUs66f0icT8t6YCkNz3TW+7fv+xzXh8kA7reJEuGvPg4B5zwPOEg8DhwC3BXvigKnDKzs7lawhBwxIe2Xn51pb6XrfQOhAHhQBf9tPf58Ckzm3Y/fbzEGgmQSDrh7nNNL/9PDIwBfjsjnig1gc3+6qgXL4YKYnGFlk99pzyF3Sxpvfv/WM6ed8b2PYnomHDPEVYBPwCr/JDDnpJedEKswwKkeY6BE69cVPitmT3V7wCnFxWoAXcXjK8IhYhucXPB2G3XlAoA88DnXidQSFjUB4lUQWh8qEQBpsKi24CicvnADtvP5KZChQoVKlSoUKFChQoVKlSocN3iP+thji/3AMpEAAAAAElFTkSuQmCC",
@@ -299,6 +311,7 @@ namespace Oxide.Plugins
         private class CrateInfo
         {
             public string SourceKey = "SrcOther";
+            public string Place;   // monument name for SrcOther crates ("" = not near one)
             public bool Classified;
             public bool Announced;
             public CrateState State;
@@ -454,6 +467,8 @@ namespace Oxide.Plugins
             var ship = entity as CargoShip;
             if (ship != null && _ships.Remove(ship))
             {
+                // Its crates go with it: drop them from the list now, with no "looted" line left behind.
+                foreach (var c in _crates.Keys.Where(c => c == null || c.IsDestroyed || c.GetParentEntity() == ship).ToList()) _crates.Remove(c);
                 Announce("CargoLeft");
                 return;
             }
@@ -462,7 +477,7 @@ namespace Oxide.Plugins
             CrateInfo ci;
             if (crate != null && _crates.TryGetValue(crate, out ci))
             {
-                if (ci.State == CrateState.Looted) Linger(ci.LootedAt, CrateLine(crate, ci));
+                if (ci.State == CrateState.Looted && ci.SourceKey != "SrcCargo") Linger(ci.LootedAt, CrateLine(crate, ci));
                 _crates.Remove(crate);
                 return;
             }
@@ -623,6 +638,7 @@ namespace Oxide.Plugins
         private void Classify(HackableLockedCrate crate, CrateInfo ci)
         {
             if (crate.GetParentEntity() is CargoShip) ci.SourceKey = "SrcCargo";
+            else if (InDeepSea(crate.transform.position)) ci.SourceKey = "SrcDeepSea";
             else if ((crate.ShortPrefabName ?? "").Contains("oilrig"))
             {
                 var pos = crate.transform.position;
@@ -637,8 +653,40 @@ namespace Oxide.Plugins
             }
             else if (crate.wasDropped) ci.SourceKey = "SrcChinook";
             else ci.SourceKey = "SrcOther";
+            if (ci.SourceKey == "SrcOther" && ci.Place == null) ci.Place = MonumentAt(crate.transform.position);
             ci.Classified = true;
         }
+
+        // The monument a position is in (or the closest one within 150 m), by its map name: "Airfield", "Harbor"…
+        private static string MonumentAt(Vector3 pos)
+        {
+            var monuments = TerrainMeta.Path != null ? TerrainMeta.Path.Monuments : null;
+            if (monuments == null) return "";
+            MonumentInfo best = null;
+            var bestDist = 150f;
+            foreach (var m in monuments)
+            {
+                if (m == null) continue;
+                if (m.IsInBounds(pos)) { best = m; break; }
+                var d = Vector3.Distance(m.transform.position, pos);
+                if (d < bestDist) { bestDist = d; best = m; }
+            }
+            return best == null ? "" : MonumentName(best);
+        }
+
+        private static string MonumentName(MonumentInfo m)
+        {
+            var phrase = m.displayPhrase != null ? m.displayPhrase.english : null;
+            if (!string.IsNullOrEmpty(phrase)) return phrase;
+            // No map label: make one from the prefab name ("assets/.../water_treatment_plant_1.prefab" → "Water Treatment Plant").
+            var n = System.IO.Path.GetFileNameWithoutExtension(m.name ?? "");
+            n = System.Text.RegularExpressions.Regex.Replace(n, @"[_\-]?\d+$", "");
+            var words = n.Replace('-', ' ').Replace('_', ' ').Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            return words.Length == 0 ? "" : string.Join(" ", words.Select(w => char.ToUpperInvariant(w[0]) + w.Substring(1)));
+        }
+
+        private string SourceName(CrateInfo ci) =>
+            ci.SourceKey == "SrcOther" && !string.IsNullOrEmpty(ci.Place) ? ci.Place : Msg(ci.SourceKey);
 
         private bool IsRig(CrateInfo ci) => ci.SourceKey == "SrcLargeRig" || ci.SourceKey == "SrcSmallRig";
 
@@ -650,8 +698,16 @@ namespace Oxide.Plugins
             return $"{s / 60}:{s % 60:00}";
         }
 
-        private static string Grid(Vector3 pos)
+        // The Deep Sea (ghost ships, islands) is a separate area outside the map, west of it.
+        private static bool InDeepSea(Vector3 pos)
         {
+            try { return DeepSeaManager.DeepSeaBounds.Contains(new Vector3(pos.x, 0f, pos.z)); }
+            catch { return false; }
+        }
+
+        private string Grid(Vector3 pos)
+        {
+            if (InDeepSea(pos)) return Msg("GridDeepSea");
             try { return MapHelper.PositionToString(pos); }
             catch { return $"{pos.x:0}, {pos.z:0}"; }
         }
@@ -690,7 +746,7 @@ namespace Oxide.Plugins
 
                 var state = ReadState(crate);
                 var grid = Grid(crate.transform.position);
-                var src = Msg(ci.SourceKey);
+                var src = SourceName(ci);
 
                 if (!ci.Announced)
                 {
@@ -773,14 +829,16 @@ namespace Oxide.Plugins
                 case Kind.SmallOilRig:
                 case Kind.LargeOilRig:
                     var key = kind == Kind.LargeOilRig ? "SrcLargeRig" : "SrcSmallRig";
-                    return _crates.Values.Any(c => c.SourceKey == key && (c.State == CrateState.Hacking || c.State == CrateState.Unlocked)) ? Tile.Active : Tile.Inactive;
+                    if (_crates.Values.Any(c => c.SourceKey == key && (c.State == CrateState.Hacking || c.State == CrateState.Unlocked))) return Tile.Active;
+                    // A locked crate sitting on the rig: loot waiting, like heli and Bradley crates.
+                    return _crates.Values.Any(c => c.SourceKey == key && c.State == CrateState.Waiting) ? Tile.Loot : Tile.Inactive;
             }
             return Tile.Inactive;
         }
 
         private HudLine CrateLine(HackableLockedCrate crate, CrateInfo ci)
         {
-            var line = new HudLine { Title = Msg(ci.SourceKey == "SrcOther" ? "SrcOther" : ci.SourceKey), Grid = Grid(crate.transform.position) };
+            var line = new HudLine { Title = SourceName(ci), Grid = Grid(crate.transform.position) };
             switch (ci.State)
             {
                 case CrateState.Hacking:
@@ -805,6 +863,28 @@ namespace Oxide.Plugins
                     break;
             }
             if (line.Title.Length > 0) line.Title = char.ToUpper(line.Title[0]) + line.Title.Substring(1);
+            return line;
+        }
+
+        private HudLine CargoLine(CargoShip ship, List<KeyValuePair<HackableLockedCrate, CrateInfo>> crates, float now)
+        {
+            var hacking = crates.Where(kv => kv.Value.State == CrateState.Hacking).Select(kv => HackRemaining(kv.Key)).OrderBy(t => t).ToList();
+            var unlocked = crates.Count(kv => kv.Value.State == CrateState.Unlocked);
+            var waiting = crates.Count(kv => kv.Value.State == CrateState.Waiting);
+            var recentlyLooted = crates.Any(kv => kv.Value.State == CrateState.Looted && now - kv.Value.LootedAt <= _config.LootedLinger);
+            var parts = new List<string>();
+            if (hacking.Count > 0) parts.Add(Msg("LineHacking", Clock(hacking[0])) + (hacking.Count > 1 ? $" (+{hacking.Count - 1})" : ""));
+            if (unlocked > 0) parts.Add(Msg("LineCountUnlocked", unlocked));
+            if (waiting > 0) parts.Add(Msg("LineCountWaiting", waiting));
+            if (parts.Count == 0 && !recentlyLooted) return null;   // everything looted a while ago
+            var line = new HudLine { Title = Msg("SrcCargo"), Grid = Grid(ship.transform.position) };
+            if (parts.Count == 0) { line.Status = Msg("LineLooted"); line.Color = "#9a9a9a"; line.Order = 9; }
+            else
+            {
+                line.Status = string.Join(", ", parts);
+                line.Color = hacking.Count > 0 ? "#ffb347" : unlocked > 0 ? "#7ee081" : "#ff8a80";
+                line.Order = hacking.Count > 0 ? 0 : unlocked > 0 ? 1 : 2;
+            }
             return line;
         }
 
@@ -836,7 +916,21 @@ namespace Oxide.Plugins
                 if (ci.State == CrateState.Waiting && IsRig(ci) && !_config.ShowIdleRigCrates) continue;
                 if (ci.State == CrateState.Looted && now - ci.LootedAt > _config.LootedLinger) continue;
                 if (!Shown(ci.SourceKey)) continue;
+                if (ci.SourceKey == "SrcCargo") continue;   // one line per ship, below
                 lines.Add(CrateLine(kv.Key, ci));
+            }
+
+            // The Cargo Ship's crates: one line per ship that follows the ship around the map.
+            if (Shown("SrcCargo"))
+            {
+                foreach (var ship in _ships)
+                {
+                    if (ship == null || ship.IsDestroyed) continue;
+                    var mine = _crates.Where(kv => kv.Key != null && !kv.Key.IsDestroyed && kv.Value.SourceKey == "SrcCargo" && kv.Key.GetParentEntity() == ship).ToList();
+                    if (mine.Count == 0) continue;
+                    var line = CargoLine(ship, mine, now);
+                    if (line != null) lines.Add(line);
+                }
             }
             if (Enabled(Kind.Airdrop))
             {
@@ -970,6 +1064,7 @@ namespace Oxide.Plugins
             CuiHelper.DestroyUi(player, RadGlow);
             CuiHelper.DestroyUi(player, RadRoot);
             CuiHelper.DestroyUi(player, InfoRoot);
+            CuiHelper.DestroyUi(player, BuffRoot);
             _info.Remove(player.userID);
         }
 
@@ -1707,6 +1802,8 @@ namespace Oxide.Plugins
         {
             public string LayoutKey;
             public string Dir, Grid, Pos;
+            public string Buffs;
+            public float NextBuffCheck;
         }
 
         private readonly Dictionary<ulong, InfoState> _info = new Dictionary<ulong, InfoState>();
@@ -1724,7 +1821,14 @@ namespace Oxide.Plugins
                 {
                     DrawInfoBase(player, L);
                     st.LayoutKey = L.Key;
-                    st.Dir = st.Grid = st.Pos = null;
+                    st.Dir = st.Grid = st.Pos = st.Buffs = null;
+                    st.NextBuffCheck = 0f;
+                }
+                var now = Time.realtimeSinceStartup;
+                if (now >= st.NextBuffCheck)
+                {
+                    st.NextBuffCheck = now + 1f;
+                    UpdateBuffs(player, L, st);
                 }
 
                 var pos = player.transform.position;
@@ -1801,6 +1905,90 @@ namespace Oxide.Plugins
             }
             CuiHelper.AddUi(player, c);
         }
+
+        #region Pet buffs
+
+        // Shown to the right of the coordinates while the Pets plugin has something going: its roar (you hit harder
+        // and heal), a tank's guard (you take less damage), or a downed pet waiting for a medical item.
+        [PluginReference] private Oxide.Core.Plugins.Plugin RustSandboxPet;
+
+        private const string BuffRoot = "EventHud.Buffs";
+
+        private void OnSandboxPetBuff(BasePlayer player)
+        {
+            InfoState st;
+            if (player != null && _info.TryGetValue(player.userID, out st)) st.NextBuffCheck = 0f;
+        }
+
+        private void UpdateBuffs(BasePlayer player, Layout L, InfoState st)
+        {
+            var buffs = _config.PetBuffs && RustSandboxPet != null && RustSandboxPet.IsLoaded
+                ? RustSandboxPet.Call("API_Buffs", player.userID.Get()) as Dictionary<string, float> : null;
+            var sig = buffs == null || buffs.Count == 0 ? "" : string.Join("|", buffs.Select(kv => kv.Key + ":" + BuffTime(kv.Value)));
+            if (sig == st.Buffs) return;
+            st.Buffs = sig;
+            CuiHelper.DestroyUi(player, BuffRoot);
+            if (sig == "") return;
+
+            var size = _config.IconSize;
+            var x0 = InfoWidth + Gap;
+            var c = new CuiElementContainer();
+            c.Add(new CuiElement
+            {
+                Name = BuffRoot,
+                Parent = "Hud",
+                Components = { new CuiImageComponent { Color = "0 0 0 0" }, Rect(L, x0, 0, buffs.Count * (size + Gap), InfoHeight) },
+            });
+            var i = 0;
+            foreach (var kv in buffs)
+            {
+                string icon, color, label;
+                switch (kv.Key)
+                {
+                    case "roar": icon = "buff_roar"; color = "1 0.75 0.3 1"; label = Msg("LabelBuffRoar"); break;
+                    case "guard": icon = "buff_guard"; color = "0.5 0.78 1 1"; label = Msg("LabelBuffGuard"); break;
+                    case "down": icon = "pet_down"; color = "1 0.32 0.25 1"; label = Msg("LabelPetDown"); break;
+                    default: continue;
+                }
+                var x = i++ * (size + Gap);
+                var tile = BuffRoot + "." + kv.Key;
+                c.Add(new CuiElement
+                {
+                    Name = tile,
+                    Parent = BuffRoot,
+                    Components =
+                    {
+                        new CuiImageComponent { Color = kv.Key == "down" ? "0.35 0.05 0.05 0.75" : "0.1 0.1 0.1 0.7" },
+                        new CuiRectTransformComponent { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x} {-size}", OffsetMax = $"{x + size} 0" },
+                    },
+                });
+                AddIcon(c, tile, icon, color, Inset(4, 6, 4, 2));
+                var time = BuffTime(kv.Value);
+                if (time != "")
+                    c.Add(new CuiElement
+                    {
+                        Parent = tile,
+                        Components =
+                        {
+                            new CuiTextComponent { Text = time, FontSize = 9, Align = TextAnchor.LowerRight, Color = "1 1 1 0.95", Font = "robotocondensed-bold.ttf" },
+                            new CuiOutlineComponent { Color = "0 0 0 0.9", Distance = "0.7 -0.7" },
+                            Inset(1, 0, 2, 0),
+                        },
+                    });
+                AddLabel(c, BuffRoot, label, 8,
+                    new CuiRectTransformComponent { AnchorMin = "0 1", AnchorMax = "0 1", OffsetMin = $"{x - 8} {-size - LabelHeight}", OffsetMax = $"{x + size + 8} {-size}" }, TextAnchor.MiddleCenter, "1 1 1 0.85");
+            }
+            CuiHelper.AddUi(player, c);
+        }
+
+        // Seconds left as shown on the tile: "24s", "3m" past two minutes, nothing when there's no limit.
+        private static string BuffTime(float seconds)
+        {
+            if (seconds < 0f) return "";
+            return seconds > 120f ? Mathf.CeilToInt(seconds / 60f) + "m" : Mathf.CeilToInt(seconds) + "s";
+        }
+
+        #endregion
 
         private void SetInfoText(BasePlayer player, string name, string parent, string text, int size, CuiRectTransformComponent rect, string color = "1 1 1 0.95")
         {

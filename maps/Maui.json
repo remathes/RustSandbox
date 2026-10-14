@@ -1,0 +1,196 @@
+{
+ "name": "Maui",
+ "description": "Real Maui terrain: Haleakal\u0101, the West Maui mountains, jungle on the wet side and desert on the dry side.",
+ "worldSize": 3000,
+ "image": "Maui.jpg",
+ "monuments": [
+  {
+   "name": "Ferry Terminal",
+   "prefab": "ferry_terminal_1",
+   "x": -1036.1,
+   "z": -789.9
+  },
+  {
+   "name": "Harbor",
+   "prefab": "harbor_2",
+   "x": 229.6,
+   "z": 546.4
+  },
+  {
+   "name": "Harbor",
+   "prefab": "harbor_1",
+   "x": -4.7,
+   "z": -846.4
+  },
+  {
+   "name": "Fishing Village",
+   "prefab": "fishing_village_c",
+   "x": -1262.3,
+   "z": 574.0
+  },
+  {
+   "name": "Fishing Village",
+   "prefab": "fishing_village_a",
+   "x": 1261.9,
+   "z": -190.6
+  },
+  {
+   "name": "Fishing Village",
+   "prefab": "fishing_village_b",
+   "x": -462.3,
+   "z": -331.9
+  },
+  {
+   "name": "Abandoned Military Base",
+   "prefab": "desert_military_base_c",
+   "x": -358.8,
+   "z": 30.7
+  },
+  {
+   "name": "Missile Silo",
+   "prefab": "nuclear_missile_silo",
+   "x": 85.2,
+   "z": 113.7
+  },
+  {
+   "name": "HQM Quarry",
+   "prefab": "mining_quarry_c",
+   "x": -135.4,
+   "z": -50.3
+  },
+  {
+   "name": "The Dome",
+   "prefab": "sphere_tank",
+   "x": -957.0,
+   "z": 702.6
+  },
+  {
+   "name": "Water Well",
+   "prefab": "water_well_d",
+   "x": 656.2,
+   "z": 181.0
+  },
+  {
+   "name": "Water Well",
+   "prefab": "water_well_b",
+   "x": -614.7,
+   "z": 382.4
+  },
+  {
+   "name": "Water Well",
+   "prefab": "water_well_e",
+   "x": 27.6,
+   "z": 338.1
+  },
+  {
+   "name": "Lighthouse",
+   "prefab": "lighthouse",
+   "x": -419.5,
+   "z": 547.2
+  },
+  {
+   "name": "Outpost",
+   "prefab": "compound",
+   "x": -219.1,
+   "z": 228.5
+  }
+ ],
+ "landSpots": [
+  [
+   -1036.1,
+   -789.9
+  ],
+  [
+   229.6,
+   546.4
+  ],
+  [
+   -4.7,
+   -846.4
+  ],
+  [
+   -1262.3,
+   574.0
+  ],
+  [
+   1261.9,
+   -190.6
+  ],
+  [
+   -462.3,
+   -331.9
+  ],
+  [
+   -358.8,
+   30.7
+  ],
+  [
+   85.2,
+   113.7
+  ],
+  [
+   -135.4,
+   -50.3
+  ],
+  [
+   -957.0,
+   702.6
+  ],
+  [
+   -419.5,
+   547.2
+  ],
+  [
+   -219.1,
+   228.5
+  ],
+  [
+   891.2,
+   -96.2
+  ],
+  [
+   13.6,
+   160.5
+  ],
+  [
+   -854.1,
+   -1019.4
+  ],
+  [
+   387.7,
+   42.4
+  ],
+  [
+   -9.4,
+   -757.5
+  ],
+  [
+   949.0,
+   -361.7
+  ],
+  [
+   315.2,
+   414.0
+  ],
+  [
+   -179.1,
+   -781.3
+  ],
+  [
+   515.3,
+   -598.7
+  ],
+  [
+   209.1,
+   -371.1
+  ],
+  [
+   -267.1,
+   -781.5
+  ],
+  [
+   -96.8,
+   142.9
+  ]
+ ]
+}

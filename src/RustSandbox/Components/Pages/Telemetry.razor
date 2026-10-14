@@ -152,7 +152,7 @@
                 }
             </div>
             <div class="panel-body">
-                <p style="margin-top:0">Players earn XP in ten skills (<strong>Mining</strong>, <strong>Woodcutting</strong>, <strong>Combat</strong>, <strong>Gardening</strong>, <strong>Electrician</strong>, <strong>Survival</strong>, <strong>Mechanic</strong>, <strong>Fishing</strong>, <strong>Scrapper</strong> and <strong>Cooking</strong>), level up and spend points on perks: more ore, wood, crops and fish, faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels and batteries, slower hunger and thirst, extra cooked food and teas, longer tea buffs, and vehicles that burn less fuel. Solo players get +25% XP and an extra point every 5 levels; teammates playing close together share 10% of each other's XP. Players type <code>/skills</code> in chat to open the skills menu.</p>
+                <p style="margin-top:0">Players earn XP in eleven skills (<strong>Mining</strong>, <strong>Woodcutting</strong>, <strong>Combat</strong>, <strong>Gardening</strong>, <strong>Electrician</strong>, <strong>Survival</strong>, <strong>Mechanic</strong>, <strong>Fishing</strong>, <strong>Scrapper</strong>, <strong>Cooking</strong> and <strong>Companion</strong>, for players with a pet), level up and spend points on perks: more ore, wood, crops and fish, faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels and batteries, slower hunger and thirst, extra cooked food and teas, longer tea buffs, pet perks like a stronger roar and getting you up when downed, and vehicles that burn less fuel. Solo players get +25% XP and an extra point every 5 levels; teammates playing close together share 10% of each other's XP. Players type <code>/skills</code> in chat to open the skills menu.</p>
                 <div class="row">
                     @if (BundledPlugin.Skills.CannotInstallReason(Server) is null)
                     {
@@ -344,6 +344,81 @@
 
         <section class="panel mt">
             <div class="panel-head">
+                <h2>Pets</h2>
+                <span class="spacer"></span>
+                @if (_petLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_petLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Each player can call a pet with <code>/pet</code> and pick the animal with <code>/pet choose</code>: a wolf, tiger or panther (fighters: <code>/pet roar</code> makes the owner hit harder and heal) or a bear, polar bear, boar or crocodile (tanks: tougher, and <code>/pet roar</code> pulls enemies onto the pet while the owner takes less damage). It follows them and joins their fights (never against players unless the config allows it). Pets can be hurt: one that goes down lies there until its owner looks at it and presses E with a bandage, syringe or medkit, and one left too long goes home to rest. It carries a backpack (<code>/pet bag</code>, or look at it and press E). Middle mouse sends it after what the player looks at: an animal or NPC gets attacked, loot gets fetched into the backpack, and with nothing in sight it collects loot nearby. <code>/pet keys</code> shows how to bind the commands to keys. Each animal's health, bite damage and toughness, the medical items, backpack size, what it fetches and the fetch button are in <code>@ConfigPath(BundledPlugin.Pet)</code>.</p>
+                <div class="row">
+                    @if (BundledPlugin.Pet.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallPetAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Pet.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Pet.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Pet.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>Weather</h2>
+                <span class="spacer"></span>
+                @if (_weatherLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_weatherLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Random weather using Rust's own sky and fades: clear, overcast, fog, rain, storms and dust. Turn it on or off, pick a weather mix or change the weather right now on the <a href="s/@Id/weather">Weather page</a>. Players type <code>/weather</code> for the forecast; admins can also use <code>/weather storm</code> (or clear, rain, fog…) in game.</p>
+                <div class="row">
+                    @if (BundledPlugin.Weather.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallWeatherAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Weather.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Weather.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Weather.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
+                <h2>NPCs</h2>
+                <span class="spacer"></span>
+                @if (_npcsLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_npcsLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">More life in the world: scientists, heavies, bandits, raiders, elite guards and animals with built-in outfits and weapons. Add them to monuments, send raider patrols down the roads and scatter camps in the empty places on the <a href="s/@Id/npcs">NPCs page</a>. Admins can also stand somewhere in game and type <code>/npcs add scientists 4</code>.</p>
+                <div class="row">
+                    @if (BundledPlugin.Npcs.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallNpcsAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Npcs.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Npcs.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Npcs.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
                 <h2>Plugin config for this server</h2>
                 <span class="spacer"></span>
                 <button class="btn sm" @onclick="() => _showKey = !_showKey">@(_showKey ? "Hide key" : "Show key")</button>
@@ -377,7 +452,7 @@
 
 @code {
     private string _publicUrl = "";
-    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded, _recyclerLoaded, _skinsLoaded, _lootLoaded;
+    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded, _recyclerLoaded, _skinsLoaded, _lootLoaded, _petLoaded, _weatherLoaded, _npcsLoaded;
     private bool _showKey, _busy, _regenOpen;
 
     protected override async Task OnServerChangedAsync()
@@ -390,7 +465,7 @@
 
     private async Task CheckPluginAsync()
     {
-        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = _recyclerLoaded = _skinsLoaded = _lootLoaded = null;
+        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = _recyclerLoaded = _skinsLoaded = _lootLoaded = _petLoaded = _weatherLoaded = _npcsLoaded = null;
         if (Server is null || !Runtime.IsOnline) return;
         var list = await Connections.QueryAsync(Id, PluginService.Prefix(Server.Settings) + "plugins", TimeSpan.FromSeconds(8));
         _pluginLoaded = list is null ? null : list.Contains("RustSandboxTelemetry", StringComparison.OrdinalIgnoreCase);
@@ -403,6 +478,9 @@
         _recyclerLoaded = list is null ? null : list.Contains(BundledPlugin.Recycler.PluginName, StringComparison.OrdinalIgnoreCase);
         _skinsLoaded = list is null ? null : list.Contains(BundledPlugin.Skins.PluginName, StringComparison.OrdinalIgnoreCase);
         _lootLoaded = list is null ? null : list.Contains(BundledPlugin.Loot.PluginName, StringComparison.OrdinalIgnoreCase);
+        _petLoaded = list is null ? null : list.Contains(BundledPlugin.Pet.PluginName, StringComparison.OrdinalIgnoreCase);
+        _weatherLoaded = list is null ? null : list.Contains(BundledPlugin.Weather.PluginName, StringComparison.OrdinalIgnoreCase);
+        _npcsLoaded = list is null ? null : list.Contains(BundledPlugin.Npcs.PluginName, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ReloadPluginAsync()
@@ -461,6 +539,9 @@
     private Task InstallQuestsAsync() => InstallBundledAsync(BundledPlugin.Quests, "Quests plugin installed. Place a quest giver from the Quests page.");
     private Task InstallHelpAsync() => InstallBundledAsync(BundledPlugin.Help, "Help plugin installed. Players type /help in game.");
     private Task InstallSkinsAsync() => InstallBundledAsync(BundledPlugin.Skins, "Skins plugin installed. Players type /skins in game.");
+    private Task InstallNpcsAsync() => InstallBundledAsync(BundledPlugin.Npcs, "NPCs plugin installed. Add NPCs on the NPCs page.");
+    private Task InstallWeatherAsync() => InstallBundledAsync(BundledPlugin.Weather, "Weather plugin installed. Set the weather mix on the Weather page.");
+    private Task InstallPetAsync() => InstallBundledAsync(BundledPlugin.Pet, "Pet plugin installed. Players type /pet in game.");
     private Task InstallLootAsync() => InstallBundledAsync(BundledPlugin.Loot, "Loot plugin installed. Set up crates on the Loot page.");
     private Task InstallRecyclerAsync() => InstallBundledAsync(BundledPlugin.Recycler, "Repair Recycler installed. Players type /recycler in game.");
 

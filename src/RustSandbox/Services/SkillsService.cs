@@ -56,7 +56,7 @@ public sealed class SkillsService(ServerConnectionManager conn, ILogger<SkillsSe
         new("mining", "Mining", "pickaxe"), new("woodcutting", "Woodcutting", "hatchet"), new("combat", "Combat", "longsword"),
         new("gardening", "Gardening", "corn"), new("electrician", "Electrician", "wiretool"), new("survival", "Survival", "bandage"),
         new("mechanic", "Mechanic", "gears"), new("fishing", "Fishing", "fishingrod.handmade"), new("scrapper", "Scrapper", "scrap"),
-        new("cooking", "Cooking", "bbq"),
+        new("cooking", "Cooking", "bbq"), new("companion", "Companion", "wolfmeat.cooked"),
     };
 
     /// <summary>Names and what one rank does (the {0} is the bonus), matching the plugin's English text.</summary>
@@ -67,6 +67,7 @@ public sealed class SkillsService(ServerConnectionManager conn, ILogger<SkillsSe
         new("toolcare", "mining", "Tool Care", "tools wear {0}% slower"),
         new("lumberjack", "woodcutting", "Lumberjack", "+{0}% wood"),
         new("craftsman", "woodcutting", "Craftsman", "craft {0}% faster"),
+        new("applepicker", "woodcutting", "Apple Picker", "{0}% chance of 1 to 3 apples when a tree falls"),
         new("thickskin", "combat", "Thick Skin", "{0}% less damage taken"),
         new("hunter", "combat", "Hunter", "+{0}% damage to animals and NPCs"),
         new("fieldmedic", "combat", "Field Medic", "healing items heal {0}% more"),
@@ -91,10 +92,15 @@ public sealed class SkillsService(ServerConnectionManager conn, ILogger<SkillsSe
         new("bigportions", "cooking", "Big Portions", "{0}% chance of an extra piece of cooked meat or fish"),
         new("masterbrewer", "cooking", "Master Brewer", "{0}% chance of extra teas from a mixing table"),
         new("steeped", "cooking", "Steeped", "tea and food buffs last {0}% longer"),
+        new("howl", "companion", "Roar", "/pet roar (wolf, tiger, panther): hit {0}% more on top"),
+        new("loyalfriend", "companion", "Loyal Friend", "your pet gets you up when downed, with {0}% health"),
+        new("packhunter", "companion", "Pack Hunter", "+{0}% meat, leather and bone from your pet's kills"),
+        new("bigpack", "companion", "Big Pack", "+{0} pet backpack slots"),
+        new("keennose", "companion", "Keen Nose", "/pet sniff finds what's within {0} m"),
     };
 
     /// <summary>Perks whose bonus is a plain number, not a percentage.</summary>
-    public static bool IsRawPerk(string id) => id == "regeneration";
+    public static bool IsRawPerk(string id) => id is "regeneration" or "bigpack" or "keennose";
 
     public static string SkillName(string id) => Skills.FirstOrDefault(s => s.Id == id)?.Name ?? id;
     public static PerkInfo? Perk(string id) => Perks.FirstOrDefault(p => p.Id == id);

@@ -1,0 +1,449 @@
+@page "/s/{Id:int}/npcs"
+@inherits ServerPageBase
+@inject NpcsService NpcsApi
+@using System.Globalization
+
+<PageTitle>@(Server?.Name ?? "Server") · NPCs</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>NPCs</h1>
+                <p>Fill the world with scientists, bandits and animals. Add a preset to any monument, send raider patrols down the roads and scatter camps in the empty places. Every preset comes with its own outfits and weapons, picked at random for each NPC.</p>
+            </div>
+            @if (_status is not null)
+            {
+                <span class="badge good">Plugin v@(_status.Version) · @_status.Alive alive</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="LoadAsync" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (_status is not null && _status.Warnings.Count > 0)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">
+                <b>Server settings NPCs need:</b>
+                <ul style="margin:.4rem 0 0">@foreach (var w in _status.Warnings) { <li>@w</li> }</ul>
+            </div>
+        }
+        @if (Runtime.IsOnline && _status is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The NPCs plugin didn't answer. Install it from <a href="s/@Id/telemetry">Telemetry → NPCs</a>, then refresh.</div>
+        }
+
+        @if (_status is not null && _status.Groups.Count > 0)
+        {
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>On the map now</h2></div>
+                <div class="panel-body">
+                    <p class="muted" style="margin-top:0">Every group the plugin has spawned, with its map grid. In game, <code>/npcs list</code> numbers them nearest first, <code>/npcs go 1</code> teleports you to one and <code>/npcs show</code> marks the NPCs near you on screen.</p>
+                    <table class="table">
+                        <thead><tr><th>Group</th><th>Type</th><th>Preset</th><th>Grid</th><th class="r">Alive</th></tr></thead>
+                        <tbody>
+                            @foreach (var g in _status.Groups.OrderBy(g => g.Kind).ThenBy(g => g.Grid))
+                            {
+                                <tr>
+                                    <td>@g.Label</td>
+                                    <td>@(g.Kind switch { "road" => "Road patrol", "camp" => "Camp", _ => "Spot" })</td>
+                                    <td>@g.Preset</td>
+                                    <td>@g.Grid</td>
+                                    <td class="r">@g.Alive / @g.Count</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        }
+
+        @if (_configError is not null)
+        {
+            <div class="callout warn">@_configError</div>
+        }
+        else if (_config is not null)
+        {
+            <div class="row" style="margin-bottom:var(--gap);flex-wrap:wrap">
+                <p class="muted" style="margin:0;flex:1">Saving reloads the plugin: every NPC it spawned is removed and spawns again with the new settings.</p>
+                @if (Runtime.IsOnline)
+                {
+                    <button class="btn" @onclick="RespawnAsync" disabled="@(_busy || _dirty)" title="Remove every NPC this plugin spawned and spawn them fresh">Respawn all</button>
+                }
+                @if (_dirty)
+                {
+                    <button class="btn ghost" @onclick="LoadAsync" disabled="@_busy">Discard</button>
+                }
+                <button class="btn primary" @onclick="SaveAsync" disabled="@(_busy || !_dirty)"><Icon Name="save" /> Save &amp; respawn</button>
+            </div>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Settings</h2></div>
+                <div class="panel-body form-grid">
+                    <label class="check wide">
+                        <input type="checkbox" checked="@_config.Enabled" @onchange="e => { _config.Enabled = e.Value is true; _dirty = true; }" />
+                        <span><b>Spawn NPCs</b><small>Off: the plugin removes its NPCs and spawns nothing.</small></span>
+                    </label>
+                    <div class="field wide">
+                        <span>Difficulty</span>
+                        <div class="row">
+                            @foreach (var d in NpcsService.Difficulties)
+                            {
+                                var dd = d;
+                                <button class="btn @(_config.Difficulty == dd ? "primary" : "")" @onclick="() => { _config.Difficulty = dd; _dirty = true; }">@dd</button>
+                            }
+                        </div>
+                        <small class="muted">Easy: less health, worse aim, less damage. Hard: tougher, sharper and harder hitting. Applies to every preset.</small>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head">
+                    <h2>Monuments</h2>
+                    <span class="spacer"></span>
+                    @if (!_monumentsLive && _monuments.Count > 0)
+                    {
+                        <span class="muted" style="font-size:13px">From the last time the server ran</span>
+                    }
+                </div>
+                <div class="panel-body" style="padding:0">
+                    @if (_monuments.Count == 0)
+                    {
+                        <p class="muted" style="padding:var(--gap)">The monument list shows up once the server has run with the NPCs plugin.</p>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Monument</th><th>NPCs here</th><th style="width:330px">Add</th></tr></thead>
+                            <tbody>
+                                @foreach (var m in _monuments)
+                                {
+                                    var mon = m;
+                                    var spots = _config.Spots.Where(s => s.Monument == mon.Key).ToList();
+                                    <tr>
+                                        <td>
+                                            <b>@mon.Name</b>
+                                            <div class="muted" style="font-size:12.5px">@(mon.Copies > 1 ? $"{mon.Copies} on this map: " : "")@string.Join(", ", mon.Grids)</div>
+                                        </td>
+                                        <td>
+                                            <div class="perk-chips">
+                                                @foreach (var s in spots)
+                                                {
+                                                    var spot = s;
+                                                    <span class="perk-chip" style="opacity:@(spot.Enabled ? 1 : .5)">
+                                                        <button class="btn sm ghost icon" title="One less" @onclick="() => Bump(spot, -1)">−</button>
+                                                        <b>@spot.Count</b> @PresetName(spot.Preset)@(mon.Copies > 1 ? " each" : "")
+                                                        <button class="btn sm ghost icon" title="One more" @onclick="() => Bump(spot, 1)">+</button>
+                                                        <span class="muted">@Alive(spot)</span>
+                                                        <button class="btn sm ghost icon" title="Remove" @onclick="() => Remove(spot)">×</button>
+                                                    </span>
+                                                }
+                                                @if (spots.Count == 0) { <span class="muted">Rust's own only</span> }
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="row" style="gap:6px">
+                                                <select class="input" style="width:150px" value="@AddPreset(mon.Key)" @onchange="e => _addPreset[mon.Key] = e.Value?.ToString() ?? DefaultAdd">
+                                                    @foreach (var p in _config.Presets)
+                                                    {
+                                                        <option value="@p.Key">@p.Value.Name@(p.Value.IsAnimal ? " (animal)" : "")</option>
+                                                    }
+                                                </select>
+                                                <input class="input" type="number" min="1" max="30" style="width:64px" value="@AddCount(mon.Key)" @onchange="e => _addCount[mon.Key] = int.TryParse(e.Value?.ToString(), out var n) ? Math.Clamp(n, 1, 30) : 4" />
+                                                <button class="btn sm primary" @onclick="() => AddAtMonument(mon)"><Icon Name="plus" /> Add</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Places picked in game</h2></div>
+                <div class="panel-body" style="padding:0">
+                    @{ var places = _config.Spots.Where(s => string.IsNullOrEmpty(s.Monument)).ToList(); }
+                    @if (places.Count == 0)
+                    {
+                        <p class="muted" style="padding:var(--gap)">Stand where you want them in game and type <code>/npcs add scientists 4</code> (any preset name, then how many). <code>/npcs remove</code> takes away the nearest one.</p>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Place</th><th>Preset</th><th>How many</th><th>Area (m)</th><th>Respawn (min)</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var s in places)
+                                {
+                                    var spot = s;
+                                    <tr style="opacity:@(spot.Map == _map || string.IsNullOrEmpty(_map) ? 1 : .5)">
+                                        <td>@spot.Label @if (!string.IsNullOrEmpty(_map) && spot.Map != _map) { <span class="badge">other map</span> }</td>
+                                        <td><select class="input" value="@spot.Preset" @onchange="e => { spot.Preset = e.Value?.ToString() ?? spot.Preset; _dirty = true; }">@foreach (var p in _config.Presets) { <option value="@p.Key">@p.Value.Name</option> }</select></td>
+                                        <td><input class="input" type="number" min="1" max="30" style="width:70px" value="@spot.Count" @onchange="e => { spot.Count = Int(e, spot.Count); _dirty = true; }" /> <span class="muted">@Alive(spot)</span></td>
+                                        <td><input class="input" type="number" min="5" max="200" style="width:80px" value="@F(spot.Radius)" @onchange="e => { spot.Radius = Float(e, spot.Radius); _dirty = true; }" /></td>
+                                        <td><input class="input" type="number" min="0.5" max="600" style="width:80px" value="@F(spot.RespawnMinutes)" @onchange="e => { spot.RespawnMinutes = Float(e, spot.RespawnMinutes); _dirty = true; }" /></td>
+                                        <td><button class="btn sm ghost" @onclick="() => Remove(spot)"><Icon Name="trash" /></button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <div class="grid-2" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--gap);margin-bottom:var(--gap)">
+                <section class="panel">
+                    <div class="panel-head"><h2>Road patrols</h2></div>
+                    <div class="panel-body form-grid">
+                        <label class="field">
+                            <span>Patrols <span class="muted">(0 = none)</span></span>
+                            <input class="input" type="number" min="0" max="12" value="@_config.Roads.Groups" @onchange="e => { _config.Roads.Groups = Int(e, _config.Roads.Groups, 0); _dirty = true; }" />
+                        </label>
+                        <label class="field">
+                            <span>NPCs per patrol</span>
+                            <input class="input" type="number" min="1" max="8" value="@_config.Roads.Size" @onchange="e => { _config.Roads.Size = Int(e, _config.Roads.Size); _dirty = true; }" />
+                        </label>
+                        <label class="field">
+                            <span>Preset</span>
+                            <select class="input" value="@_config.Roads.Preset" @onchange="e => { _config.Roads.Preset = e.Value?.ToString() ?? _config.Roads.Preset; _dirty = true; }">@foreach (var p in _config.Presets.Where(x => !x.Value.IsAnimal)) { <option value="@p.Key">@p.Value.Name</option> }</select>
+                        </label>
+                        <label class="field">
+                            <span>Respawn (minutes)</span>
+                            <input class="input" type="number" min="0.5" max="600" value="@F(_config.Roads.RespawnMinutes)" @onchange="e => { _config.Roads.RespawnMinutes = Float(e, _config.Roads.RespawnMinutes); _dirty = true; }" />
+                        </label>
+                        <small class="muted wide">Each patrol walks along a road, away from monuments, turning back at the end. They stop to fight anyone they spot.</small>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head"><h2>Wild camps</h2></div>
+                    <div class="panel-body form-grid">
+                        <div class="field wide">
+                            <span>How many</span>
+                            <div class="row">
+                                @foreach (var a in NpcsService.CampAmounts)
+                                {
+                                    var aa = a;
+                                    <button class="btn @(string.Equals(_config.Camps.Amount, aa, StringComparison.OrdinalIgnoreCase) ? "primary" : "")" @onclick="() => { _config.Camps.Amount = aa; _dirty = true; }">@aa</button>
+                                }
+                            </div>
+                            <small class="muted">Few = 4, Some = 8, Many = 14 camps, away from monuments and bases. The spots are picked once per map.</small>
+                        </div>
+                        <label class="field">
+                            <span>Preset</span>
+                            <select class="input" value="@_config.Camps.Preset" @onchange="e => { _config.Camps.Preset = e.Value?.ToString() ?? _config.Camps.Preset; _dirty = true; }">@foreach (var p in _config.Presets) { <option value="@p.Key">@p.Value.Name</option> }</select>
+                        </label>
+                        <label class="field">
+                            <span>NPCs per camp</span>
+                            <div class="row" style="gap:6px">
+                                <input class="input" type="number" min="1" max="8" style="width:70px" value="@_config.Camps.MinSize" @onchange="e => { _config.Camps.MinSize = Int(e, _config.Camps.MinSize); _dirty = true; }" />
+                                <span class="muted">to</span>
+                                <input class="input" type="number" min="1" max="10" style="width:70px" value="@_config.Camps.MaxSize" @onchange="e => { _config.Camps.MaxSize = Int(e, _config.Camps.MaxSize); _dirty = true; }" />
+                            </div>
+                        </label>
+                        <label class="field">
+                            <span>Respawn (minutes)</span>
+                            <input class="input" type="number" min="0.5" max="600" value="@F(_config.Camps.RespawnMinutes)" @onchange="e => { _config.Camps.RespawnMinutes = Float(e, _config.Camps.RespawnMinutes); _dirty = true; }" />
+                        </label>
+                        <label class="check">
+                            <input type="checkbox" checked="@_config.Camps.Campfire" @onchange="e => { _config.Camps.Campfire = e.Value is true; _dirty = true; }" />
+                            <span><b>Campfire</b><small>A lit campfire marks each camp.</small></span>
+                        </label>
+                    </div>
+                </section>
+            </div>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Presets</h2></div>
+                <div class="panel-body">
+                    <p class="muted" style="margin-top:0">Each NPC gets one outfit and one weapon at random from its preset. Write item short names (like <code>rifle.ak</code> or <code>metal.facemask</code>): weapons separated by commas, one outfit per line.</p>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:var(--gap)">
+                        @foreach (var kv in _config.Presets)
+                        {
+                            var key = kv.Key;
+                            var p = kv.Value;
+                            <div class="panel" style="background:var(--steel-800)">
+                                <div class="panel-head">
+                                    <h2 style="font-size:15px">@p.Name <span class="muted" style="font-weight:400">· @key</span></h2>
+                                </div>
+                                <div class="panel-body form-grid">
+                                    <label class="field">
+                                        <span>Name</span>
+                                        <input class="input" value="@p.Name" @onchange="e => { p.Name = e.Value?.ToString() ?? p.Name; _dirty = true; }" />
+                                    </label>
+                                    <label class="field">
+                                        <span>Health <span class="muted">(0 = Rust's)</span></span>
+                                        <input class="input" type="number" min="0" max="5000" value="@F(p.Health)" @onchange="e => { p.Health = Float(e, p.Health, 0); _dirty = true; }" />
+                                    </label>
+                                    <label class="field">
+                                        <span>Damage <span class="muted">(1 = normal)</span></span>
+                                        <input class="input" type="number" min="0.1" max="5" step="0.1" value="@F(p.Damage)" @onchange="e => { p.Damage = Float(e, p.Damage, 0.1f); _dirty = true; }" />
+                                    </label>
+                                    @if (p.IsAnimal)
+                                    {
+                                        <label class="field wide">
+                                            <span>Animals <span class="muted">(wolf2, bear, polarbear, boar, stag, panther, tiger)</span></span>
+                                            <input class="input" value="@string.Join(", ", p.Animals)" @onchange="e => { p.Animals = List(e); _dirty = true; }" />
+                                        </label>
+                                    }
+                                    else
+                                    {
+                                        <label class="field">
+                                            <span>Aim <span class="muted">(1 = Rust's scientists)</span></span>
+                                            <input class="input" type="number" min="0.2" max="5" step="0.1" value="@F(p.Accuracy)" @onchange="e => { p.Accuracy = Float(e, p.Accuracy, 0.2f); _dirty = true; }" />
+                                        </label>
+                                        <label class="field">
+                                            <span>Weapon drops <span class="muted">(% of kills)</span></span>
+                                            <input class="input" type="number" min="0" max="100" value="@p.WeaponDrop" @onchange="e => { p.WeaponDrop = Int(e, p.WeaponDrop, 0); _dirty = true; }" />
+                                        </label>
+                                        <label class="field">
+                                            <span>Body</span>
+                                            <select class="input" value="@p.Body" @onchange="e => { p.Body = e.Value?.ToString() ?? p.Body; _dirty = true; }">
+                                                <option value="roam">Scientist</option>
+                                                <option value="heavy">Heavy scientist</option>
+                                            </select>
+                                        </label>
+                                        <label class="field wide">
+                                            <span>Weapons</span>
+                                            <input class="input" value="@string.Join(", ", p.Weapons)" disabled="@p.KeepRustGear" @onchange="e => { p.Weapons = List(e); _dirty = true; }" />
+                                        </label>
+                                        <label class="field wide">
+                                            <span>Outfits <span class="muted">(one per line)</span></span>
+                                            <textarea class="input" rows="@Math.Max(2, p.Outfits.Count + 1)" disabled="@p.KeepRustGear" value="@string.Join("\n", p.Outfits.Select(o => string.Join(", ", o)))" @onchange="e => { p.Outfits = Outfits(e); _dirty = true; }"></textarea>
+                                        </label>
+                                        <label class="check wide">
+                                            <input type="checkbox" checked="@p.KeepRustGear" @onchange="e => { p.KeepRustGear = e.Value is true; _dirty = true; }" />
+                                            <span><b>Use Rust's own scientist gear</b><small>Ignores the weapons and outfits above.</small></span>
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private const string DefaultAdd = "scientists";
+    private bool _busy, _loaded, _dirty, _monumentsLive;
+    private NpcsStatus? _status;
+    private NpcsConfig? _config;
+    private string? _configError;
+    private string _map = "";
+    private List<NpcMonument> _monuments = new();
+    private readonly Dictionary<string, string> _addPreset = new();
+    private readonly Dictionary<string, int> _addCount = new();
+
+    protected override Task OnServerChangedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (Server is null) return;
+        _busy = true;
+        try
+        {
+            _status = await NpcsApi.StatusAsync(Id);
+            (_config, _configError) = await NpcsService.ReadConfigAsync(Server);
+            if (_status is not null && _status.Monuments.Count > 0)
+            {
+                (_map, _monuments, _monumentsLive) = (_status.Map, _status.Monuments, true);
+            }
+            else
+            {
+                (_map, _monuments) = await NpcsService.ReadSavedMonumentsAsync(Server);
+                _monumentsLive = false;
+            }
+            _dirty = false;
+            _loaded = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private string PresetName(string id) => _config?.Presets.TryGetValue(id, out var p) == true ? p.Name : id;
+
+    private string AddPreset(string key) => _addPreset.TryGetValue(key, out var p) ? p : (_config?.Presets.ContainsKey(DefaultAdd) == true ? DefaultAdd : _config?.Presets.Keys.FirstOrDefault() ?? "");
+    private int AddCount(string key) => _addCount.TryGetValue(key, out var n) ? n : 4;
+
+    private string Alive(NpcSpot spot)
+    {
+        if (_status is null) return "";
+        var groups = _status.Groups.Where(g => g.Spot == spot.Id).ToList();
+        return groups.Count == 0 ? "" : $"({groups.Sum(g => g.Alive)}/{groups.Sum(g => g.Count)} alive)";
+    }
+
+    private void AddAtMonument(NpcMonument m)
+    {
+        if (_config is null) return;
+        var preset = AddPreset(m.Key);
+        if (!_config.Presets.ContainsKey(preset)) return;
+        var existing = _config.Spots.FirstOrDefault(s => s.Monument == m.Key && s.Preset == preset);
+        if (existing is not null) existing.Count = Math.Min(30, existing.Count + AddCount(m.Key));
+        else _config.Spots.Add(new NpcSpot { Id = NpcsService.NewId(_config), Preset = preset, Count = AddCount(m.Key), Monument = m.Key, Label = m.Name, RespawnMinutes = 10 });
+        _dirty = true;
+    }
+
+    private void Bump(NpcSpot spot, int by)
+    {
+        spot.Count = Math.Clamp(spot.Count + by, 1, 30);
+        _dirty = true;
+    }
+
+    private void Remove(NpcSpot spot)
+    {
+        _config?.Spots.Remove(spot);
+        _dirty = true;
+    }
+
+    private static string F(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static int Int(ChangeEventArgs e, int fallback, int min = 1) =>
+        int.TryParse(e.Value?.ToString(), out var n) ? Math.Max(min, n) : fallback;
+
+    private static float Float(ChangeEventArgs e, float fallback, float min = 0.5f) =>
+        float.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? Math.Max(min, v) : fallback;
+
+    private static List<string> List(ChangeEventArgs e) =>
+        (e.Value?.ToString() ?? "").Split(new[] { ',', '\n', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private static List<List<string>> Outfits(ChangeEventArgs e) =>
+        (e.Value?.ToString() ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => line.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList())
+            .Where(o => o.Count > 0)
+            .ToList();
+
+    private async Task SaveAsync()
+    {
+        if (Server is null || _config is null) return;
+        _busy = true;
+        try
+        {
+            var err = await NpcsApi.SaveConfigAsync(Server, _config);
+            if (err is not null) { Toasts.Error(err); return; }
+            Toasts.Success(Runtime.IsOnline ? "Saved. NPCs are respawning with the new settings." : "Saved. It applies the next time the server starts.");
+        }
+        finally { _busy = false; }
+        await Task.Delay(1500);
+        await LoadAsync();
+    }
+
+    private async Task RespawnAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await NpcsApi.RespawnAsync(Id);
+            Toasts.Show(string.IsNullOrWhiteSpace(reply) ? "Done." : reply.Trim());
+        }
+        finally { _busy = false; }
+        await Task.Delay(3000);
+        await LoadAsync();
+    }
+}

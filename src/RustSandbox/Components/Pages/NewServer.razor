@@ -115,18 +115,32 @@
                         </InputSelect>
                         <small>Kill stats and the live map need Oxide or Carbon.</small>
                     </label>
-                    <label class="field">
-                        <span>Map size</span>
-                        <InputNumber @bind-Value="_s.WorldSize" />
-                        <small>@SeedLibrary.SizeAdvice(_s.WorldSize)</small>
-                    </label>
-                    <label class="field">
-                        <span>Map seed</span>
-                        <div class="row" style="flex-wrap:nowrap">
-                            <InputNumber @bind-Value="_s.Seed" class="input" />
-                            <button type="button" class="btn icon" title="Random seed" @onclick="() => _s.Seed = SeedLibrary.RandomSeed()"><Icon Name="dice" /></button>
-                        </div>
-                    </label>
+                    @if (_defaultMap is not null)
+                    {
+                        <label class="field">
+                            <span>Map</span>
+                            <select @bind="_mapChoice">
+                                <option value="custom">@_defaultMap.Title (ready to play, @_defaultMap.WorldSize m)</option>
+                                <option value="procedural">Procedural (seed + size)</option>
+                            </select>
+                            <small>More maps and uploads in Settings → World.</small>
+                        </label>
+                    }
+                    @if (_defaultMap is null || _mapChoice == "procedural")
+                    {
+                        <label class="field">
+                            <span>Map size</span>
+                            <InputNumber @bind-Value="_s.WorldSize" />
+                            <small>@SeedLibrary.SizeAdvice(_s.WorldSize)</small>
+                        </label>
+                        <label class="field">
+                            <span>Map seed</span>
+                            <div class="row" style="flex-wrap:nowrap">
+                                <InputNumber @bind-Value="_s.Seed" class="input" />
+                                <button type="button" class="btn icon" title="Random seed" @onclick="() => _s.Seed = SeedLibrary.RandomSeed()"><Icon Name="dice" /></button>
+                            </div>
+                        </label>
+                    }
                 </div>
             </div>
         }
@@ -140,6 +154,8 @@
 
 @code {
     private ServerSettings _s = new() { RconPassword = "", Seed = SeedLibrary.RandomSeed() };
+    private readonly CustomMapInfo? _defaultMap = CustomMaps.Find(CustomMaps.DefaultMap);
+    private string _mapChoice = "custom";
     private string _name = "";
     private string _color = "#4c8df6";
     private bool _managed;
@@ -193,6 +209,12 @@
         {
             _s.ManageProcess = _managed;
             if (_managed) _s.RconHost = "127.0.0.1";
+            if (_managed && _defaultMap is not null && _mapChoice == "custom")
+            {
+                _s.MapMode = MapMode.CustomMap;
+                _s.CustomMapFile = _defaultMap.FileName;
+                if (_defaultMap.WorldSize is >= 1000 and <= 6000) _s.WorldSize = _defaultMap.WorldSize;
+            }
             var server = await Servers.CreateAsync(new ServerInstance
             {
                 Name = string.IsNullOrWhiteSpace(_name) ? _s.Hostname : _name.Trim(),

@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Repair Recycler", "RustSandbox", "1.2.0")]
+    [Info("Rust Sandbox Repair Recycler", "RustSandbox", "1.2.1")]
     [Description("A deployable recycler with a built-in repair bench, placed from one item.")]
     public class RustSandboxRecycler : RustPlugin
     {
@@ -180,6 +180,13 @@ namespace Oxide.Plugins
                 fixedUp[rec.net.ID.Value] = kv.Value;
                 _live[rec.net.ID.Value] = rec;
                 if (_cfg.AlwaysPowered) KeepPowered(rec);
+                // Benches placed by an older version move to the current spot.
+                var bench = BenchOf(rec);
+                if (bench != null && Corner)
+                {
+                    PlaceBench(rec, bench);
+                    bench.SendNetworkUpdateImmediate();
+                }
             }
             if (fixedUp.Count != _data.Stations.Count || fixedUp.Keys.Except(_data.Stations.Keys).Any())
             {
@@ -317,6 +324,19 @@ namespace Oxide.Plugins
         {
             var bench = GameManager.server.CreateEntity(BenchPrefab, rec.transform.position, rec.transform.rotation) as RepairBench;
             if (bench == null) { PrintWarning("Couldn't create the repair bench for a corner station."); return null; }
+            bench.OwnerID = rec.OwnerID;
+            bench.SetParent(rec);
+            PlaceBench(rec, bench);
+            bench.Spawn();
+            return bench;
+        }
+
+        // How far the bench sits back from the recycler's front (the side with its buttons), so the two make an L
+        // that opens towards you rather than a T. The config nudge adds to it.
+        private const float BenchSetBack = 0.5f;
+
+        private void PlaceBench(Recycler rec, RepairBench bench)
+        {
             var rb = rec.bounds;
             var side = string.Equals(_cfg.BenchSide, "Right", StringComparison.OrdinalIgnoreCase) ? 1f : -1f;
             var turn = Quaternion.Euler(0f, _cfg.BenchTurn, 0f);
@@ -326,13 +346,9 @@ namespace Oxide.Plugins
             var benchHalfX = Mathf.Abs(turnedExtents.x);
             var benchHalfZ = Mathf.Abs(turnedExtents.z);
             var x = rb.center.x + side * (rb.extents.x + benchHalfX + 0.05f + _cfg.BenchNudgeSide);
-            var z = rb.center.z + rb.extents.z - benchHalfZ + _cfg.BenchNudgeForward;
-            bench.OwnerID = rec.OwnerID;
-            bench.SetParent(rec);
+            var z = rb.center.z + rb.extents.z - benchHalfZ - BenchSetBack + _cfg.BenchNudgeForward;
             bench.transform.localPosition = new Vector3(x, 0f, z);
             bench.transform.localRotation = turn;
-            bench.Spawn();
-            return bench;
         }
 
         private static readonly int RoomMask = LayerMask.GetMask("Construction", "Deployed", "World", "Default");

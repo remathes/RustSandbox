@@ -18,14 +18,19 @@ A self-hosted web app (ASP.NET Core 8 + Blazor Server, C#) for running one or ma
 | **Per-player stats** | K/D, headshot rate, average & longest kill, **favourite weapon (most kills)** vs **most used weapon (most shots)**, accuracy, nemesis, favourite target, *what they killed* and *what killed them*, per-weapon breakdown, recent fights. |
 | **Map generator** | Random seeds (crypto RNG), roll six to compare, size slider with size advice, labelled preview, PNG export, a saved-seed library with favourites, RustMaps link, and "send this seed to a server". |
 | **Schedules** | Daily / weekly / every N minutes / first Thursday (forced wipe) / once: restarts with an in-game countdown that finishes *on time*, map or full wipes with optional new seed, SteamCMD updates, announcements and command lists. Run any task on demand. |
-| **Server settings** | Everything to launch and manage an instance: hostname, description, images, tags, ports, RCON, map mode (procedural / custom URL / Barren / Hapis / Craggy / Savas), seed & size, PvE, radiation, stability, decay, save interval, tick rate, FPS limit, EAC, custom convars, extra args, framework, branch, auto-restart, auto-start. Shows the exact launch command. |
+| **Custom maps** | Maui, a real-terrain island made in RustEdit, ships with the app and is the default map for the demo and new servers. Upload your own `.map` files to the map library and pick one per server: the manager hosts the file for players to download, sets `server.levelurl` and copies the map into the server folder, and shows the map's own image on the live map. |
+| **World options** | Shape procedural maps with Rust's own generator settings: biome mix, starter/medium/hard zones, roads, rivers, power lines, rails, underwater labs and a monument checklist. Applies on the next map wipe. |
+| **Server settings** | Everything to launch and manage an instance: hostname, description, images, tags, ports, RCON, map mode (procedural / custom map from the library or a URL / Barren / Hapis / Craggy / Savas), seed & size, PvE, radiation, stability, decay, save interval, tick rate, FPS limit, EAC, custom convars, extra args, framework, branch, auto-restart, auto-start. Shows the exact launch command. |
 | **Hosting (optional)** | When the server runs on the same machine: start/stop/restart with countdowns, crash auto-restart (with crash-loop protection), SteamCMD install/update, one-click Oxide or Carbon install, one-click plugin install, safe wipes (files are moved to `wipe-backups/`, not deleted). |
 | **Dashboard controls** | Start, stop, restart (with countdown), map wipe and full wipe in one panel, next to a live heat map of the server and the installed vs latest Rust build and Oxide/Carbon version. |
 | **Updates** | Checks every 30 min for new Rust builds (Steam) and Oxide/Carbon releases (GitHub). Shows "Update available" on the dashboard and server list, writes to the console and posts to Discord. **Update now** warns players, saves and stops the server, updates Rust through SteamCMD, reinstalls Oxide/Carbon to match, and starts it again. Optional fully automatic updates. SteamCMD is downloaded automatically if you don't have it. |
-| **Skills** | Ten skills that level up as you play (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking), each with perks, plus a solo-friendly XP bonus. Leaderboards and each player's levels in the manager. |
+| **Skills** | Eleven skills that level up as you play (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking, Companion), each with perks, plus a solo-friendly XP bonus. Leaderboards and each player's levels in the manager. |
 | **Daily rewards** | A daily spin for a random item with rarity tiers, streak bonuses and a spinning reel. Edit the prize pool in the manager. |
 | **Quests** | Quest givers you place around the map (with outfits and skins), quests to gather, hunt, loot, craft, deliver, swipe keycards or explore, a progress tracker and rewards you pick from pictures of every item. |
 | **Loot** | Every crate, barrel and NPC body with Rust's own items and the real chance of each one, worked out from the game's loot tables. Keep Rust's loot, replace it with your own list or add to it, each item with an amount and a chance %. Plus a loot multiplier, scrap per crate and how many crates Patrol Heli and Bradley drop. |
+| **Weather** | Random weather with Rust's own sky and fades: an on/off, a weather mix (mostly clear, varied, stormy or custom %), "change it now" buttons and a `/weather` forecast for players. |
+| **NPCs** | More life in the world without a wall of settings: presets (scientists, heavies, bandits, raiders, elite guards, wolf packs, bears, big cats) with built-in random outfits and weapons, no Kits plugin. Add them to any monument from a list, send raider patrols along the roads and scatter bandit camps in the empty places. One Easy / Normal / Hard switch. Set on the manager's **NPCs** page. |
+| **Pets** | `/pet` calls a companion that follows you, fights with you, carries a backpack and fetches loot (dropped items, crates, barrels, bodies, plants) with a key. Pick a wolf, tiger or panther (fighters) or a bear, polar bear, boar or crocodile (tanks). `/pet roar` buffs you, and a downed pet gets back up with a bandage, syringe or medkit. Made for solo play. |
 | **Events** | A treasure hunt across the map's monuments and a train heist on a self-driving loot train, with an in-game HUD for running events and locked-crate timers. |
 | **Rates & stacks** | Built-in gather rates (1x–10x presets, per resource, per source: hits, pickups, farming, quarries), optional "[10x]" tag in the server name, stack sizes per category or per item (item list read live from your server with vanilla sizes), smelt speed/output, food cooking speed, wood use per oven and charcoal. Applied live by the bundled `RustSandboxTweaks` plugin; turning it off restores vanilla values. |
 | **Plugins** | Installed list with version, author and loaded/not-loaded status; turn plugins on/off (disabled ones are moved to `plugins/disabled` so they stay off), reload, delete; edit each plugin's JSON config with validation, a `.bak` backup and automatic reload; search uMod and install in one click; upload `.cs` files; check uMod for newer versions and update one or all. |
@@ -105,7 +110,7 @@ The manager ships these Oxide/Carbon plugins and installs each one with a button
 | `RustSandboxTelemetry` | Feeds combat, gathering and position stats to the manager. | – |
 | `RustSandboxTweaks` | Gather rates, stack sizes, smelting and cooking speed, inventory sorting, furnace auto-split, remove tool. | `/sort`, `/autosplit`, `/remove` |
 | `RustSandboxEventHud` | HUD tiles for airdrops, Patrol Heli, Bradley, Cargo, Chinook and oil rigs, locked-crate timers, a radiation detector and a compass/grid tile. | `/eventhud` |
-| `RustSandboxSkills` | Ten skills with levels and perks. | `/skills` |
+| `RustSandboxSkills` | Eleven skills with levels and perks. | `/skills` |
 | `RustSandboxDaily` | A daily reward spin with streaks. | `/daily` |
 | `RustSandboxEvents` | Treasure hunt and train heist events. | `/hunt` |
 | `RustSandboxQuests` | Quest givers, quests, tracker and rewards. | `/quests`, admin `/questgiver` |
@@ -113,8 +118,15 @@ The manager ships these Oxide/Carbon plugins and installs each one with a button
 | `RustSandboxRecycler` | **Repair Recycler**: one deployable item that places a recycler and repair bench joined in an L. Optional full repair, recycler speed and output (vanilla by default). | `/recycler`, `/recycler craft` |
 | `RustSandboxSkins` | A `/skins` picker for clothes, weapons, tools and deployables. Shows the skins each player owns on Steam plus Facepunch's free ones, because Facepunch's server rules forbid handing out paid skins people don't own. | `/skins` |
 | `RustSandboxLoot` | Custom loot per crate, barrel and NPC type (edited on the manager's **Loot** page). Anything you don't change keeps Rust's own loot. | console `sandboxloot.refill` |
+| `RustSandboxWeather` | Random weather mix, forecast and "change it now" (set on the manager's **Weather** page). Off = Rust's own weather. | `/weather`, admin `/weather storm` |
+| `RustSandboxNpcs` | NPC spawns from presets with built-in gear: monuments, places picked in game, road patrols and wild camps (set on the manager's **NPCs** page). | `/npcs` (admin) |
+| `RustSandboxPet` | A pet per player (wolf, tiger, panther, bear, polar bear, boar or crocodile): keeps pace, tanks enemies off you, fights, roars to buff you, carries a backpack and fetches loot. Middle mouse fetches or attacks what you look at. Downed pets are revived with meds. | `/pet`, `/pet choose`, `/pet roar`, `/pet patrol`, `/pet bag`, `/pet keys` |
 
 Each plugin's settings are in its config file (`oxide/config/<plugin>.json`) and most are also editable in the manager.
+
+## Custom maps
+
+Pick **Custom map** in *Settings → World* and choose a map from the library, or upload a `.map` file (RustEdit maps or ones from map sites, up to 300 MB). Maps that come with the app live in `maps/` (see [maps/README.md](maps/README.md)); uploaded ones go to the data folder's `maps` folder. Players download the map from the manager at `/mapfiles/<name>.map`, so friends outside your network need the manager's port (5080, TCP) forwarded and the *Map download address* set to your public IP, e.g. `http://203.0.113.5:5080`. You can also paste a direct map URL hosted somewhere else instead. Maps with RustEdit IO or spawners need the Oxide.Ext.RustEdit extension on the server.
 
 ## About the map previews
 
@@ -138,6 +150,7 @@ src/RustSandbox/
     Demo/                    simulated demo world
   Components/                Blazor layout, pages and shared components
   wwwroot/                   CSS, map/heat-map JavaScript
+maps/                             maps that ship with the app (Maui)
 plugins/RustSandboxTelemetry.cs   stats plugin
 plugins/RustSandboxTweaks.cs      rates, stacks & smelting
 plugins/RustSandbox*.cs           the other game plugins (see "Game plugins included")

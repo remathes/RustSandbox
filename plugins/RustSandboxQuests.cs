@@ -28,7 +28,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Quests", "RustSandbox", "1.3.0")]
+    [Info("Rust Sandbox Quests", "RustSandbox", "1.3.2")]
     [Description("Quest givers you place in the world, quests with gather/kill/loot/craft/deliver/keycard/visit goals, a progress tracker and rewards.")]
     public class RustSandboxQuests : RustPlugin
     {
@@ -434,7 +434,7 @@ namespace Oxide.Plugins
         {
             foreach (var p in BasePlayer.activePlayerList)
             {
-                CuiHelper.DestroyUi(p, Root);
+                Close(p);
                 CuiHelper.DestroyUi(p, TrackerUi);
             }
             DespawnAllGivers();
@@ -469,6 +469,7 @@ namespace Oxide.Plugins
             if (player == null) return;
             _views.Remove(player.userID);
             _trackerQueued.Remove(player.userID);
+            _shown.Remove(player.userID);
         }
 
         #endregion
@@ -1242,6 +1243,51 @@ namespace Oxide.Plugins
 
         private const string Root = "SandboxQuests.Root";
         private const string Main = Root + ".Main";
+
+        // Players whose backdrop (the part that frees the mouse) is on screen. Redraws only replace the window inside
+        // it: destroying and re-adding the backdrop made the game grab the mouse and re-centre it on every click.
+        private readonly HashSet<ulong> _shown = new HashSet<ulong>();
+
+        private void Close(BasePlayer player)
+        {
+            if (player == null) return;
+            _shown.Remove(player.userID);
+            CuiHelper.DestroyUi(player, Root);
+        }
+
+
+        // The first draw (the window together with the backdrop that frees the mouse) comes out blurry in game until
+        // the window is drawn again, which is what clicking anything did. So the window is sent once more a moment
+        // after it opens, unless something newer was drawn in the meantime.
+        private readonly Dictionary<ulong, int> _draws = new Dictionary<ulong, int>();
+
+        private void Drawn(BasePlayer player, CuiElementContainer ui, bool fresh, string root, string main)
+        {
+            int n;
+            _draws.TryGetValue(player.userID, out n);
+            _draws[player.userID] = ++n;
+            if (!fresh) return;
+            var again = new CuiElementContainer();
+            again.AddRange(ui.Where(e => e.Name == main || e.Name != root && e.Parent != root));
+            timer.Once(0.2f, () =>
+            {
+                int now;
+                if (player == null || !player.IsConnected || !_draws.TryGetValue(player.userID, out now) || now != n) return;
+                if (!StillOpen(player)) return;
+                CuiHelper.DestroyUi(player, main);
+                CuiHelper.AddUi(player, again);
+            });
+        }
+
+        private bool StillOpen(BasePlayer player) => _shown.Contains(player.userID);
+
+        private void Show(BasePlayer player, CuiElementContainer ui)
+        {
+            var fresh = _shown.Add(player.userID);
+            CuiHelper.DestroyUi(player, fresh ? Root : Main);
+            CuiHelper.AddUi(player, ui);
+            Drawn(player, ui, fresh, Root, Main);
+        }
         private const int PageSize = 8;
 
         private class View
@@ -1295,7 +1341,7 @@ namespace Oxide.Plugins
             View v;
             if (!_views.TryGetValue(player.userID, out v))
             {
-                CuiHelper.DestroyUi(player, Root);
+                Close(player);
                 return;
             }
             var g = v.GiverId != null ? FindGiver(v.GiverId) : null;
@@ -1305,7 +1351,7 @@ namespace Oxide.Plugins
             {
                 case "close":
                     _views.Remove(player.userID);
-                    CuiHelper.DestroyUi(player, Root);
+                    Close(player);
                     return;
                 case "select":
                     if (q != null) v.Selected = q.Id;
@@ -1362,19 +1408,20 @@ namespace Oxide.Plugins
             var id = player.UserIDString;
             var d = Data(player);
             var g = v.GiverId != null ? FindGiver(v.GiverId) : null;
-            if (v.GiverId != null && g == null) { _views.Remove(player.userID); CuiHelper.DestroyUi(player, Root); return; }
+            if (v.GiverId != null && g == null) { _views.Remove(player.userID); Close(player); return; }
             var quests = Listed(player, d, g);
             if (v.Selected == null || !quests.Any(q => q.Id == v.Selected)) v.Selected = quests.Count > 0 ? quests[0].Id : null;
             var pages = Math.Max(1, (quests.Count + PageSize - 1) / PageSize);
             v.Page = Math.Min(v.Page, pages - 1);
 
             var ui = new CuiElementContainer();
-            ui.Add(new CuiPanel
-            {
-                Image = { Color = "0 0 0 0.55" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                CursorEnabled = true,
-            }, "Overlay", Root);
+            if (!_shown.Contains(player.userID))
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = "0 0 0 0.55" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                    CursorEnabled = true,
+                }, "Overlay", Root);
             ui.Add(new CuiPanel
             {
                 Image = { Color = "0.10 0.10 0.10 0.98" },
@@ -1420,8 +1467,7 @@ namespace Oxide.Plugins
             if (sel != null) DrawDetails(ui, player, d, g, sel, v);
             else Label(ui, Main, Msg("Pick", id), 14, 290, 200, 770, 260, TextAnchor.MiddleCenter, "0.7 0.7 0.7 1");
 
-            CuiHelper.DestroyUi(player, Root);
-            CuiHelper.AddUi(player, ui);
+            Show(player, ui);
         }
 
         private void DrawDetails(CuiElementContainer ui, BasePlayer player, PlayerData d, Giver g, Quest q, View v)

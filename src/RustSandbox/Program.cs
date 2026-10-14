@@ -90,6 +90,8 @@ builder.Services.AddSingleton<SkillsService>();
 builder.Services.AddSingleton<DailyService>();
 builder.Services.AddSingleton<QuestsService>();
 builder.Services.AddSingleton<LootService>();
+builder.Services.AddSingleton<WeatherService>();
+builder.Services.AddSingleton<NpcsService>();
 builder.Services.AddSingleton<EventsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerMonitorService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SchedulerService>());
@@ -112,6 +114,9 @@ using (var scope = app.Services.CreateScope())
     await db.Database.EnsureCreatedAsync();
     await SchemaUpgrade.ApplyAsync(db, app.Logger);
     await SeedData.EnsureAsync(db, app.Configuration);
+    // Hosted custom maps default to the manager's Public URL (Preferences), so players can download them.
+    var publicUrl = (await db.AppSettings.FindAsync("PublicUrl"))?.Value ?? app.Configuration["Manager:PublicUrl"];
+    if (!string.IsNullOrWhiteSpace(publicUrl)) CustomMaps.DefaultHostUrl = publicUrl.Trim().TrimEnd('/');
 }
 
 var authUser = app.Configuration["Auth:Username"] ?? "admin";
@@ -172,7 +177,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok", time = DateTime.
 app.MapGet("/api/plugin", () =>
     Results.File(Encoding.UTF8.GetBytes(ProcessManager.ReadPluginSource()), "text/plain", ProcessManager.PluginFileName));
 
-foreach (var bundled in new[] { BundledPlugin.EventHud, BundledPlugin.Skills, BundledPlugin.Daily, BundledPlugin.Events, BundledPlugin.Quests, BundledPlugin.Help, BundledPlugin.Recycler, BundledPlugin.Skins, BundledPlugin.Loot })
+foreach (var bundled in new[] { BundledPlugin.EventHud, BundledPlugin.Skills, BundledPlugin.Daily, BundledPlugin.Events, BundledPlugin.Quests, BundledPlugin.Help, BundledPlugin.Recycler, BundledPlugin.Skins, BundledPlugin.Loot, BundledPlugin.Pet, BundledPlugin.Weather, BundledPlugin.Npcs })
     app.MapGet(bundled.DownloadPath, () => Results.File(Encoding.UTF8.GetBytes(bundled.ReadSource()), "text/plain", bundled.FileName));
 
 app.MapGet("/api/servers/{id:int}/plugin-config", async (int id, ServerService servers, HttpRequest req, IConfiguration cfg) =>
@@ -202,6 +207,21 @@ app.MapGet("/api/servers/{id:int}/map-thumb", async (int id, ServerService serve
     ctx.Response.Headers.CacheControl = "private, max-age=86400";
     return Results.File(thumb, "image/jpeg");
 });
+
+// ---- hosted custom maps: Rust and its players download these, so no sign-in
+app.MapGet($"/{CustomMaps.DownloadPrefix}/{{file}}", (string file) =>
+{
+    if (CustomMaps.Find(file) is { } map)
+        return Results.File(map.FullPath, "application/octet-stream", map.FileName, enableRangeProcessing: true);
+    // The live-map picture and details that go with a map (Name.jpg / Name.png / Name.json).
+    var ext = Path.GetExtension(file).ToLowerInvariant();
+    if (ext is ".jpg" or ".png" or ".json" && CustomMaps.Find(Path.ChangeExtension(file, ".map")) is { } owner)
+    {
+        var side = Path.ChangeExtension(owner.FullPath, ext);
+        if (File.Exists(side)) return Results.File(side, ext switch { ".jpg" => "image/jpeg", ".png" => "image/png", _ => "application/json" });
+    }
+    return Results.NotFound();
+}).AllowAnonymous();
 
 // ---- item icons from the Rust game folder (Bundles\items\<shortname>.png)
 app.MapGet("/api/servers/{id:int}/item-icon/{shortname}", async (int id, string shortname, ServerService servers, HttpContext ctx) =>

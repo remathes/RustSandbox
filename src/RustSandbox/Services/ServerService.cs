@@ -113,5 +113,6 @@ public sealed class ServerService(
         if (row is null) db.AppSettings.Add(new AppSetting { Key = key, Value = value });
         else row.Value = value;
         await db.SaveChangesAsync();
+        if (key == "PublicUrl" && !string.IsNullOrWhiteSpace(value)) CustomMaps.DefaultHostUrl = value.Trim().TrimEnd('/');
     }
 }

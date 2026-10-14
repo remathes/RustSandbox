@@ -1,6 +1,6 @@
 // Rust Sandbox — Skills
-// Players earn XP in ten skills (Mining, Woodcutting, Combat, Gardening, Electrician, Survival,
-// Mechanic, Fishing, Scrapper, Cooking), level up, and spend points on perks: more ore, wood, crops and fish,
+// Players earn XP in eleven skills (Mining, Woodcutting, Combat, Gardening, Electrician, Survival,
+// Mechanic, Fishing, Scrapper, Cooking, Companion), level up, and spend points on perks: more ore, wood, crops and fish,
 // faster crafting, growing and recycling, cheaper research, less damage taken, stronger solar panels...
 //
 // Solo friendly: players without a team earn bonus XP and extra points, so one person can
@@ -17,12 +17,13 @@ using System.Text;
 using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Game.Rust.Cui;
+using UnityEngine.UI;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Skills", "RustSandbox", "1.6.0")]
-    [Description("Ten skills with levels and perks (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking) and a solo-friendly XP bonus.")]
+    [Info("Rust Sandbox Skills", "RustSandbox", "1.8.5")]
+    [Description("Eleven skills with levels and perks (Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking, Companion) and a solo-friendly XP bonus.")]
     public class RustSandboxSkills : RustPlugin
     {
         #region Definitions
@@ -37,7 +38,8 @@ namespace Oxide.Plugins
         private const string Fishing = "fishing";
         private const string Scrapper = "scrapper";
         private const string Cooking = "cooking";
-        private static readonly string[] Skills = { Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking };
+        private const string Companion = "companion"; // the wolf from RustSandboxPet: its plugin does the perks, this one keeps the XP and ranks
+        private static readonly string[] Skills = { Mining, Woodcutting, Combat, Gardening, Electrician, Survival, Mechanic, Fishing, Scrapper, Cooking, Companion };
 
         private class PerkDef
         {
@@ -59,6 +61,7 @@ namespace Oxide.Plugins
             new PerkDef { Id = "toolcare", Skill = Mining, DefaultMaxRank = 3, DefaultPerRank = 0.10 },
             new PerkDef { Id = "lumberjack", Skill = Woodcutting, DefaultMaxRank = 5, DefaultPerRank = 0.10 },
             new PerkDef { Id = "craftsman", Skill = Woodcutting, DefaultMaxRank = 5, DefaultPerRank = 0.08 },
+            new PerkDef { Id = "applepicker", Skill = Woodcutting, DefaultMaxRank = 5, DefaultPerRank = 0.08 },
             new PerkDef { Id = "thickskin", Skill = Combat, DefaultMaxRank = 5, DefaultPerRank = 0.04 },
             new PerkDef { Id = "hunter", Skill = Combat, DefaultMaxRank = 3, DefaultPerRank = 0.08 },
             new PerkDef { Id = "fieldmedic", Skill = Combat, DefaultMaxRank = 5, DefaultPerRank = 0.10 },
@@ -83,6 +86,11 @@ namespace Oxide.Plugins
             new PerkDef { Id = "bigportions", Skill = Cooking, DefaultMaxRank = 5, DefaultPerRank = 0.06 },
             new PerkDef { Id = "masterbrewer", Skill = Cooking, DefaultMaxRank = 3, DefaultPerRank = 0.10 },
             new PerkDef { Id = "steeped", Skill = Cooking, DefaultMaxRank = 5, DefaultPerRank = 0.10 },
+            new PerkDef { Id = "howl", Skill = Companion, DefaultMaxRank = 3, DefaultPerRank = 0.10 },
+            new PerkDef { Id = "loyalfriend", Skill = Companion, DefaultMaxRank = 3, DefaultPerRank = 0.25 },
+            new PerkDef { Id = "packhunter", Skill = Companion, DefaultMaxRank = 5, DefaultPerRank = 0.10 },
+            new PerkDef { Id = "bigpack", Skill = Companion, DefaultMaxRank = 3, DefaultPerRank = 4, Raw = true, Tracked = false },
+            new PerkDef { Id = "keennose", Skill = Companion, DefaultMaxRank = 3, DefaultPerRank = 40, Raw = true, Tracked = false },
         };
 
         private static PerkDef FindPerk(string id)
@@ -145,6 +153,8 @@ namespace Oxide.Plugins
             [JsonProperty("XP per tech tree unlock")] public double XpTechTree = 15;
             [JsonProperty("XP per piece of meat or fish cooked")] public double XpCookMeat = 2;
             [JsonProperty("XP per tea or other item made at a mixing table")] public double XpBrew = 8;
+            [JsonProperty("Companion XP for a kill your wolf helped with (times its Combat XP)")] public double XpCompanionKill = 1.0;
+            [JsonProperty("Companion XP per thing your wolf fetches")] public double XpCompanionFetch = 2;
             [JsonProperty("Combat XP by prefab")] public Dictionary<string, double> CombatXp = new Dictionary<string, double>
             {
                 ["chicken"] = 5,
@@ -276,6 +286,32 @@ namespace Oxide.Plugins
                 ["Skill.fishing"] = "Fishing",
                 ["Skill.scrapper"] = "Scrapper",
                 ["Skill.cooking"] = "Cooking",
+                ["Skill.companion"] = "Companion",
+                ["Perk.howl"] = "Howl",
+                ["Perk.howl.Desc"] = "/pet howl: you hit {0}% harder and heal a little for 30 s (every 3 min)",
+                ["Perk.loyalfriend"] = "Loyal Friend",
+                ["Perk.loyalfriend.Desc"] = "When you're downed your wolf gets you up with {0}% health (every 10 min)",
+                ["Perk.packhunter"] = "Pack Hunter",
+                ["Perk.packhunter.Desc"] = "+{0}% meat, leather and bone from animals your wolf helped kill",
+                ["Perk.bigpack"] = "Big Pack",
+                ["Perk.bigpack.Desc"] = "+{0} slots in your wolf's backpack",
+                ["Perk.keennose"] = "Keen Nose",
+                ["Perk.keennose.Desc"] = "/pet sniff: your wolf tells you what's within {0} m (animals, NPCs, crates)",
+                ["Pop.howl"] = "<color=#ffd479>Howl</color> +{0} damage",
+                ["Perk.howl.v2"] = "Roar",
+                ["Perk.howl.Desc.v2"] = "Your pet's /pet roar (wolf, tiger, panther): you hit {0}% harder on top, and it heals you a little more",
+                ["Perk.loyalfriend.Desc.v2"] = "When you're downed your pet gets you up with {0}% health (every 10 min)",
+                ["Perk.packhunter.Desc.v2"] = "+{0}% meat, leather and bone from animals your pet helped kill",
+                ["Perk.bigpack.Desc.v2"] = "+{0} slots in your pet's backpack",
+                ["Perk.keennose.Desc.v2"] = "/pet sniff: your pet tells you what's within {0} m (animals, NPCs, crates)",
+                ["Pop.howl.v2"] = "<color=#ffd479>Roar</color> +{0} damage",
+                ["Total.howl.v2"] = "{0} extra damage from roars",
+                ["Total.loyalfriend.v2"] = "{0} times your pet got you up",
+                ["Pop.loyalfriend"] = "<color=#ffd479>Loyal Friend</color> got you up",
+                ["Pop.packhunter"] = "<color=#ffd479>Pack Hunter</color> +{0}",
+                ["Total.howl"] = "{0} extra damage from howls",
+                ["Total.loyalfriend"] = "{0} times your wolf got you up",
+                ["Total.packhunter"] = "{0} extra meat, leather and bone",
                 ["Perk.bigportions"] = "Big Portions",
                 ["Perk.bigportions.Desc"] = "{0}% chance of an extra piece when meat or fish cooks",
                 ["Perk.masterbrewer"] = "Master Brewer",
@@ -294,6 +330,10 @@ namespace Oxide.Plugins
                 ["Perk.luckystrike.Desc"] = "{0}% chance to double a hit on ore, stone or trees",
                 ["Perk.toolcare"] = "Tool Care",
                 ["Perk.toolcare.Desc"] = "Tools wear out {0}% slower",
+                ["Perk.applepicker"] = "Apple Picker",
+                ["Perk.applepicker.Desc"] = "{0}% chance of 1 to 3 apples when you fell a tree",
+                ["Pop.applepicker"] = "<color=#ffd479>Apple Picker</color> +{0} apples",
+                ["Total.applepicker"] = "{0} apples found",
                 ["Perk.lumberjack"] = "Lumberjack",
                 ["Perk.lumberjack.Desc"] = "+{0}% wood from trees",
                 ["Perk.craftsman"] = "Craftsman",
@@ -408,6 +448,9 @@ namespace Oxide.Plugins
                 ["UiTeam"] = "<color=#7bd88f>Team:</color> teammates within {0}m share {1}% of each other's XP",
                 ["UiLevel"] = "Level {0}",
                 ["UiTabLevel"] = "Lv {0}",
+                ["UiTabPts"] = "+{0} pt",
+                ["UiLevelLine"] = "Level {0} of {1}",
+                ["UiLevelLine.v2"] = "Level {0}  (max {1})",
                 ["UiTabPoints"] = "<color=#7bd88f>{0} pt</color>   Lv {1}",
                 ["UiXp"] = "{0} / {1} XP",
                 ["UiMaxLevel"] = "MAX LEVEL",
@@ -447,8 +490,17 @@ namespace Oxide.Plugins
             }, this);
         }
 
+        // Oxide never overwrites a message already in a server's lang file, so text that changed is registered under
+        // a new key (".v2") and looked up there instead.
+        private static readonly HashSet<string> Reworded = new HashSet<string>
+        {
+            "Perk.howl", "Perk.howl.Desc", "Perk.loyalfriend.Desc", "Perk.packhunter.Desc", "Perk.bigpack.Desc", "Perk.keennose.Desc",
+            "Pop.howl", "Total.howl", "Total.loyalfriend", "UiLevelLine",
+        };
+
         private string Msg(string key, string userId, params object[] args)
         {
+            if (Reworded.Contains(key)) key += ".v2";
             var text = lang.GetMessage(key, this, userId);
             return args.Length == 0 ? text : string.Format(text, args);
         }
@@ -610,6 +662,7 @@ namespace Oxide.Plugins
             {
                 HidePopup(p);
                 CuiHelper.DestroyUi(p, MenuUi);
+                _menuShown.Remove(p.userID);
             }
             SaveData();
         }
@@ -640,7 +693,9 @@ namespace Oxide.Plugins
             _popups.Remove(player.userID);
             _craftSeen.Remove(player.userID);
             _menus.Remove(player.userID);
+            _menuShown.Remove(player.userID);
             _lastPos.Remove(player.userID);
+            _lastFight.Remove(player.userID);
             _meta.Remove(player.userID);
         }
 
@@ -906,6 +961,22 @@ namespace Oxide.Plugins
             return finish;
         }
 
+        // Who last chopped each tree, so Apple Picker (and the felling XP) happen when it falls. The "finished" gather
+        // hook only fires for trees that hand out a finish bonus, which isn't every tree, so apples never dropped.
+        private readonly Dictionary<TreeEntity, KeyValuePair<BasePlayer, float>> _chopper = new Dictionary<TreeEntity, KeyValuePair<BasePlayer, float>>();
+
+        private void PickApples(BasePlayer player)
+        {
+            if (player == null || !player.IsConnected || !Allowed(player)) return;
+            var chance = Bonus(player.userID, "applepicker");
+            if (chance <= 0 || UnityEngine.Random.value >= chance) return;
+            var amount = UnityEngine.Random.Range(1, 4);
+            var apples = ItemManager.CreateByName("apple", amount);
+            if (apples == null) return;
+            player.GiveItem(apples, BaseEntity.GiveItemReason.ResourceHarvested);
+            Note(player, "applepicker", amount);
+        }
+
         private void Gather(ResourceDispenser dispenser, BasePlayer player, Item item, bool finished)
         {
             if (dispenser == null || item == null || item.info == null || !Allowed(player)) return;
@@ -919,6 +990,12 @@ namespace Oxide.Plugins
             else if (dispenser.gatherType == ResourceDispenser.GatherType.Tree)
             {
                 Earn(player, Woodcutting, GatherXp(dispenser, finished, _config.XpTreeHit, _config.XpTreeFinish));
+                var tree = dispenser.baseEntity as TreeEntity;
+                if (tree != null && player != null)
+                {
+                    if (_chopper.Count > 500) _chopper.Clear();
+                    _chopper[tree] = new KeyValuePair<BasePlayer, float>(player, UnityEngine.Time.realtimeSinceStartup);
+                }
                 if (item.info.shortname != "wood") return;
                 mult = 1 + Bonus(player.userID, "lumberjack");
             }
@@ -992,7 +1069,7 @@ namespace Oxide.Plugins
 
         private static bool IsAnimalOrNpc(BaseCombatEntity entity)
         {
-            if (entity is BaseNpc) return true;
+            if (entity is BaseNpc || entity is Rust.Ai.Gen2.BaseNPC2) return true;
             var bp = entity as BasePlayer;
             return bp != null && (bp.IsNpc || !bp.userID.IsSteamId());
         }
@@ -1002,6 +1079,9 @@ namespace Oxide.Plugins
             if (entity == null || info == null || info.damageTypes == null) return;
 
             var victim = entity as BasePlayer;
+            var by = info.Initiator as BaseCombatEntity;
+            if (victim != null && by != null && by != victim) _lastFight[victim.userID] = UnityEngine.Time.time;
+            if (info.InitiatorPlayer != null && info.InitiatorPlayer != entity) _lastFight[info.InitiatorPlayer.userID] = UnityEngine.Time.time;
             if (victim != null && Allowed(victim))
             {
                 var skin = Bonus(victim.userID, "thickskin");
@@ -1060,14 +1140,54 @@ namespace Oxide.Plugins
                 _lastKill[key] = now;
                 xp = _config.XpPlayerKill;
             }
-            else if (!_config.CombatXp.TryGetValue(entity.ShortPrefabName, out xp))
-            {
-                if (victim != null) xp = _config.XpNpcDefault;
-                else if (entity is BaseNpc) xp = _config.XpAnimalDefault;
-                else return;
-            }
+            else if ((xp = KillXp(entity)) <= 0) return;
             Earn(killer, Combat, xp);
         }
+
+        /// <summary>Combat XP for killing an NPC or animal (0 = none). New-style animals are named like "wolf2".</summary>
+        private double KillXp(BaseCombatEntity entity)
+        {
+            double xp;
+            var name = entity.ShortPrefabName ?? "";
+            if (_config.CombatXp.TryGetValue(name, out xp)) return xp;
+            if (name.EndsWith("2") && _config.CombatXp.TryGetValue(name.Substring(0, name.Length - 1), out xp)) return xp;
+            if (entity is BasePlayer) return _config.XpNpcDefault;
+            if (entity is BaseNpc || entity is Rust.Ai.Gen2.BaseNPC2) return _config.XpAnimalDefault;
+            return 0;
+        }
+
+        #region Companion (API for RustSandboxPet: its wolf earns the XP, the pet plugin does the perks)
+
+        private double API_PerkBonus(ulong id, string perk)
+        {
+            var player = BasePlayer.FindByID(id);
+            return player != null && !Allowed(player) ? 0 : Bonus(id, perk);
+        }
+
+        private int API_PerkRank(ulong id, string perk) => Rank(id, perk);
+
+        /// <summary>The wolf helped kill something: the owner gets Companion XP, plus Combat XP if the wolf landed the kill.</summary>
+        private void API_CompanionKill(BasePlayer owner, BaseCombatEntity victim, bool ownerKilled)
+        {
+            if (owner == null || victim == null || !Allowed(owner)) return;
+            var xp = KillXp(victim);
+            if (xp <= 0) return;
+            Earn(owner, Companion, xp * _config.XpCompanionKill);
+            if (!ownerKilled) Earn(owner, Combat, xp);
+        }
+
+        private void API_CompanionFetch(BasePlayer owner, int count)
+        {
+            if (owner != null && count > 0) Earn(owner, Companion, count * _config.XpCompanionFetch);
+        }
+
+        /// <summary>A Companion perk did something (counted for /skills and shown in the pop-up).</summary>
+        private void API_NotePerk(BasePlayer player, string perk, double amount)
+        {
+            if (player != null && Allowed(player) && FindPerk(perk) != null) Note(player, perk, amount);
+        }
+
+        #endregion
 
         private void OnHealingItemUse(MedicalTool tool, BasePlayer healer, IMedicalToolTarget toTarget)
         {
@@ -1218,6 +1338,22 @@ namespace Oxide.Plugins
 
         private void OnEntityKill(BaseNetworkable net)
         {
+            var tree = net as TreeEntity;
+            if (tree != null)
+            {
+                KeyValuePair<BasePlayer, float> by;
+                if (_chopper.TryGetValue(tree, out by))
+                {
+                    _chopper.Remove(tree);
+                    if (UnityEngine.Time.realtimeSinceStartup - by.Value < 5f && by.Key != null && Allowed(by.Key))
+                    {
+                        PickApples(by.Key);
+                        var disp = tree.GetComponent<ResourceDispenser>();
+                        if (disp == null || !_finishPaid.Contains(disp)) Earn(by.Key, Woodcutting, _config.XpTreeFinish);
+                    }
+                }
+                return;
+            }
             var oven = net as BaseOven;
             if (oven != null) _rawBefore.Remove(oven);
             var e = net as BaseEntity;
@@ -1299,6 +1435,16 @@ namespace Oxide.Plugins
 
         private readonly Dictionary<ulong, MetaSnap> _meta = new Dictionary<ulong, MetaSnap>();
 
+        // When each player last hit or was hit by something. Rust's own SecondsSinceAttacked also counts cold,
+        // hunger, thirst, bleeding and radiation as attacks, which kept Regeneration from ever running.
+        private readonly Dictionary<ulong, float> _lastFight = new Dictionary<ulong, float>();
+
+        private bool InCombat(BasePlayer player)
+        {
+            float t;
+            return _lastFight.TryGetValue(player.userID, out t) && UnityEngine.Time.time - t < 10f;
+        }
+
         private void OnRunPlayerMetabolism(PlayerMetabolism m, BaseCombatEntity entity, float delta)
         {
             var player = entity as BasePlayer;
@@ -1339,7 +1485,7 @@ namespace Oxide.Plugins
                 m.oxygen.Add((snap.Oxygen - m.oxygen.value) * (float)Math.Min(0.95, breath));
 
             var regen = Bonus(player.userID, "regeneration");
-            if (regen > 0 && player.SecondsSinceAttacked > 10f && !player.IsWounded() && player.health < player.MaxHealth())
+            if (regen > 0 && !InCombat(player) && !player.IsWounded() && player.health < player.MaxHealth())
             {
                 var heal = (float)Math.Min(regen / 60.0 * snap.Delta, player.MaxHealth() - player.health);
                 player.Heal(heal);
@@ -1937,6 +2083,7 @@ namespace Oxide.Plugins
             ["toolcare"] = "hammer",
             ["lumberjack"] = "wood",
             ["craftsman"] = "workbench1",
+            ["applepicker"] = "apple",
             ["thickskin"] = "metal.facemask",
             ["hunter"] = "bow.hunting",
             ["fieldmedic"] = "syringe.medical",
@@ -1965,6 +2112,12 @@ namespace Oxide.Plugins
             ["bargain"] = "research.table",
             ["techdiscount"] = "workbench2",
             [Cooking] = "bbq",
+            [Companion] = "wolfmeat.cooked",
+            ["howl"] = "hat.wolf",
+            ["loyalfriend"] = "bandage",
+            ["packhunter"] = "wolfmeat.raw",
+            ["bigpack"] = "box.wooden.large",
+            ["keennose"] = "map",
             ["bigportions"] = "meat.pork.cooked",
             ["masterbrewer"] = "mixingtable",
             ["steeped"] = "maxhealthtea.advanced",
@@ -1992,8 +2145,39 @@ namespace Oxide.Plugins
         private void CloseMenu(BasePlayer player)
         {
             _menus.Remove(player.userID);
+            _menuShown.Remove(player.userID);
             CuiHelper.DestroyUi(player, MenuUi);
         }
+
+        // Players whose menu backdrop (the part that frees the mouse) is on screen. Redraws only replace the window
+        // inside it: destroying and re-adding the backdrop made the game grab the mouse and re-centre it on every click.
+        private readonly HashSet<ulong> _menuShown = new HashSet<ulong>();
+
+
+        // The first draw (the window together with the backdrop that frees the mouse) comes out blurry in game until
+        // the window is drawn again, which is what clicking anything did. So the window is sent once more a moment
+        // after it opens, unless something newer was drawn in the meantime.
+        private readonly Dictionary<ulong, int> _draws = new Dictionary<ulong, int>();
+
+        private void Drawn(BasePlayer player, CuiElementContainer ui, bool fresh, string root, string main)
+        {
+            int n;
+            _draws.TryGetValue(player.userID, out n);
+            _draws[player.userID] = ++n;
+            if (!fresh) return;
+            var again = new CuiElementContainer();
+            again.AddRange(ui.Where(e => e.Name == main || e.Name != root && e.Parent != root));
+            timer.Once(0.2f, () =>
+            {
+                int now;
+                if (player == null || !player.IsConnected || !_draws.TryGetValue(player.userID, out now) || now != n) return;
+                if (!StillOpen(player)) return;
+                CuiHelper.DestroyUi(player, main);
+                CuiHelper.AddUi(player, again);
+            });
+        }
+
+        private bool StillOpen(BasePlayer player) => _menuShown.Contains(player.userID);
 
         private void RefreshMenu(BasePlayer player)
         {
@@ -2115,7 +2299,7 @@ namespace Oxide.Plugins
             });
         }
 
-        // ---- the menu: 860x500, centered. Skills on the left, the selected skill's perks on the right.
+        // ---- the menu: 860x500, centered. Skill tabs across the top, the selected skill's header and XP bar, then its perks in a scrolling list.
 
         private void DrawMenu(BasePlayer player, MenuState m)
         {
@@ -2123,19 +2307,23 @@ namespace Oxide.Plugins
             var d = Get(player.userID);
             var c = new CuiElementContainer();
 
-            c.Add(new CuiPanel
+            var fresh = _menuShown.Add(player.userID);
+            if (fresh)
             {
-                Image = { Color = "0 0 0 0.6" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                CursorEnabled = true,
-            }, "Overlay", MenuUi);
-            // Clicking the dark area around the window closes it.
-            c.Add(new CuiButton
-            {
-                Button = { Command = "sandboxskills.ui close", Color = "0 0 0 0" },
-                Text = { Text = "" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-            }, MenuUi);
+                c.Add(new CuiPanel
+                {
+                    Image = { Color = "0 0 0 0.6" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                    CursorEnabled = true,
+                }, "Overlay", MenuUi);
+                // Clicking the dark area around the window closes it.
+                c.Add(new CuiButton
+                {
+                    Button = { Command = "sandboxskills.ui close", Color = "0 0 0 0" },
+                    Text = { Text = "" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                }, MenuUi);
+            }
             c.Add(new CuiPanel
             {
                 Image = { Color = ColBg },
@@ -2157,65 +2345,96 @@ namespace Oxide.Plugins
             Label(c, MenuMain, bonus, 13, 260, 452, 800, 500, TextAnchor.MiddleRight, ColMuted);
             Button(c, MenuMain, "X", 16, "sandboxskills.ui close", ColRed, 812, 462, 848, 490);
 
-            // Skill tabs: one compact row each, squeezed to fit above the footer
-            var rowH = Skills.Length > 9 ? 34f : 37f;
+            // Skill tabs across the top: icon, name, level, and a thin XP strip along the bottom
+            var tabGap = 4f;
+            var tabW = (828f - (Skills.Length - 1) * tabGap) / Skills.Length;
             for (var i = 0; i < Skills.Length; i++)
             {
                 var skill = Skills[i];
                 var sd = d.Skills[skill];
-                var top = 436f - i * (rowH + (Skills.Length > 9 ? 3f : 4f));
+                var x0 = 16f + i * (tabW + tabGap);
                 var tab = MenuMain + ".Tab" + i;
-                Button(c, MenuMain, "", 1, "sandboxskills.ui tab " + skill, skill == m.Skill ? ColTabOn : ColCard, 16, top - rowH, 276, top, tab);
-                Icon(c, tab, skill, 5, 3, 5 + rowH - 6, rowH - 3);
-                Label(c, tab, SkillName(skill, id), 13, 42, 16, 170, rowH - 1);
+                Button(c, MenuMain, "", 1, "sandboxskills.ui tab " + skill, skill == m.Skill ? ColTabOn : ColCard, x0, 380, x0 + tabW, 444, tab);
+                Icon(c, tab, skill, tabW / 2 - 15, 24, tabW / 2 + 15, 54);
+                Label(c, tab, SkillName(skill, id), tabW >= 80 ? 11 : 10, 1, 5, tabW - 1, 22, TextAnchor.MiddleCenter);
+                Label(c, tab, Msg("UiTabLevel", id, sd.Level), 9, 3, 46, tabW / 2, 62, TextAnchor.UpperLeft, "1 0.83 0.47 1");
                 var free = PointsFree(d, skill);
-                Label(c, tab, free > 0 ? Msg("UiTabPoints", id, free, sd.Level) : Msg("UiTabLevel", id, sd.Level), 11, 140, 16, 254, rowH - 1,
-                    TextAnchor.MiddleRight, "1 0.83 0.47 1");
-                var maxed = sd.Level >= _config.MaxLevel;
-                var need = XpToNext(sd.Level);
-                var frac = maxed ? 1f : (float)Math.Max(0, Math.Min(1, sd.Xp / need));
-                Box(c, tab, ColBarBg, 42, 4, 254, 15);
-                if (frac > 0) Box(c, tab, ColGreen, 42, 4, 42 + 212 * frac, 15);
-                Label(c, tab, maxed ? Msg("UiMaxLevel", id) : Msg("UiXp", id, Math.Floor(sd.Xp).ToString("N0"), need.ToString("N0")), 8, 42, 4, 254, 15, TextAnchor.MiddleCenter);
+                if (free > 0) Label(c, tab, Msg("UiTabPts", id, free), 9, tabW / 2, 46, tabW - 3, 62, TextAnchor.UpperRight, "0.48 0.85 0.56 1");
+                var tabMaxed = sd.Level >= _config.MaxLevel;
+                var tabFrac = tabMaxed ? 1f : (float)Math.Max(0, Math.Min(1, sd.Xp / XpToNext(sd.Level)));
+                Box(c, tab, ColBarBg, 0, 0, tabW, 3);
+                if (tabFrac > 0) Box(c, tab, ColGreen, 0, 0, tabW * tabFrac, 3);
             }
 
-            // Left footer
-            Button(c, MenuMain, Msg(d.HideXp ? "UiPopupsOff" : "UiPopupsOn", id), 12, "sandboxskills.ui popups", ColGray, 16, 20, 142, 56);
-            Button(c, MenuMain, Msg("UiClose", id), 12, "sandboxskills.ui close", ColGray, 150, 20, 276, 56);
-
-            // Perks of the selected skill
+            // The selected skill: name, level, a wide XP bar and the points left
+            var cur = d.Skills[m.Skill];
             var freePts = PointsFree(d, m.Skill);
-            Label(c, MenuMain, Msg("UiPerksTitle", id, SkillName(m.Skill, id)), 18, 292, 404, 600, 436);
-            Label(c, MenuMain, freePts > 0 ? Msg("UiPoints", id, freePts) : Msg("UiNoPoints", id), 14, 600, 404, 844, 436,
+            Icon(c, MenuMain, m.Skill, 16, 328, 60, 372);
+            Label(c, MenuMain, SkillName(m.Skill, id), 20, 70, 350, 300, 374);
+            Label(c, MenuMain, Msg("UiLevelLine", id, cur.Level, _config.MaxLevel), 12, 70, 328, 300, 350, TextAnchor.MiddleLeft, ColMuted);
+            var maxed = cur.Level >= _config.MaxLevel;
+            var need = XpToNext(cur.Level);
+            var frac = maxed ? 1f : (float)Math.Max(0, Math.Min(1, cur.Xp / need));
+            Box(c, MenuMain, ColBarBg, 300, 338, 640, 362);
+            if (frac > 0) Box(c, MenuMain, ColGreen, 300, 338, 300 + 340 * frac, 362);
+            Label(c, MenuMain, maxed ? Msg("UiMaxLevel", id) : Msg("UiXp", id, Math.Floor(cur.Xp).ToString("N0"), need.ToString("N0")), 11, 300, 338, 640, 362, TextAnchor.MiddleCenter);
+            Label(c, MenuMain, freePts > 0 ? Msg("UiPoints", id, freePts) : Msg("UiNoPoints", id), 14, 650, 330, 844, 370,
                 TextAnchor.MiddleRight, freePts > 0 ? "0.48 0.85 0.56 1" : ColMuted);
-            var j = 0;
-            foreach (var p in Perks)
+
+            // Perks: a scrolling list, so skills with many perks still fit
+            var perks = Perks.Where(p => p.Skill == m.Skill).ToList();
+            const float cardH = 100f, cardGap = 8f, viewH = 258f;
+            var contentH = Math.Max(viewH, perks.Count * (cardH + cardGap) - cardGap);
+            var scroll = MenuMain + ".Perks";
+            c.Add(new CuiElement
             {
-                if (p.Skill != m.Skill) continue;
-                var top = 396f - j * 114;
-                DrawPerkCard(c, MenuMain + ".Perk" + j, p, d, freePts, id, top);
-                j++;
-            }
+                Name = scroll,
+                Parent = MenuMain,
+                Components =
+                {
+                    // The wheel only scrolls while the pointer is over something that catches it, so the whole
+                    // view gets an (almost) invisible background.
+                    new CuiImageComponent { Color = "0 0 0 0.01" },
+                    new CuiScrollViewComponent
+                    {
+                        Vertical = true,
+                        Horizontal = false,
+                        MovementType = ScrollRect.MovementType.Clamped,
+                        ScrollSensitivity = 40f,
+                        Inertia = false,
+                        ContentTransform = new CuiRectTransform { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = $"0 {-contentH}", OffsetMax = "0 0" },
+                        VerticalScrollbar = new CuiScrollbar { Size = 6f, AutoHide = true, HandleColor = "0.55 0.55 0.55 0.9", HighlightColor = "0.7 0.7 0.7 1", PressedColor = "0.8 0.8 0.8 1", TrackColor = "0.1 0.1 0.1 0.6" },
+                    },
+                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = "16 64", OffsetMax = $"844 {64 + viewH}" },
+                },
+            });
+            for (var j = 0; j < perks.Count; j++)
+                DrawPerkCard(c, scroll, MenuMain + ".Perk" + j, perks[j], d, freePts, id, contentH - j * (cardH + cardGap));
+
+            // Footer
+            Button(c, MenuMain, Msg(d.HideXp ? "UiPopupsOff" : "UiPopupsOn", id), 12, "sandboxskills.ui popups", ColGray, 16, 16, 142, 54);
+            Button(c, MenuMain, Msg("UiClose", id), 12, "sandboxskills.ui close", ColGray, 150, 16, 276, 54);
 
             // Right footer: what just happened, the reset button and a key-bind tip
             if (!string.IsNullOrEmpty(m.Status))
-                Label(c, MenuMain, m.Status, 12, 292, 34, 670, 58, TextAnchor.MiddleLeft, m.StatusGood ? "0.48 0.85 0.56 1" : "1 0.62 0.45 1");
-            Label(c, MenuMain, Msg("UiTip", id), 10, 292, 12, 670, 32, TextAnchor.MiddleLeft, "0.6 0.6 0.6 0.9", false);
+                Label(c, MenuMain, m.Status, 12, 292, 32, 670, 56, TextAnchor.MiddleLeft, m.StatusGood ? "0.48 0.85 0.56 1" : "1 0.62 0.45 1");
+            Label(c, MenuMain, Msg("UiTip", id), 10, 292, 10, 670, 30, TextAnchor.MiddleLeft, "0.6 0.6 0.6 0.9", false);
             if (PointsSpent(d, m.Skill) > 0)
             {
                 var wait = RespecWait(d);
                 if (wait > TimeSpan.Zero)
-                    Button(c, MenuMain, Msg("UiResetWait", id, FormatWait(wait)), 11, null, ColGray, 680, 20, 844, 56, null, ColMuted);
+                    Button(c, MenuMain, Msg("UiResetWait", id, FormatWait(wait)), 11, null, ColGray, 680, 16, 844, 54, null, ColMuted);
                 else
                     Button(c, MenuMain, m.ConfirmReset ? Msg("UiResetConfirm", id) : Msg("UiReset", id, SkillName(m.Skill, id)), 12,
-                        "sandboxskills.ui reset", m.ConfirmReset ? ColRed : ColGray, 680, 20, 844, 56);
+                        "sandboxskills.ui reset", m.ConfirmReset ? ColRed : ColGray, 680, 16, 844, 54);
             }
 
-            CuiHelper.DestroyUi(player, MenuUi);
+            CuiHelper.DestroyUi(player, fresh ? MenuUi : MenuMain);
             CuiHelper.AddUi(player, c);
+            Drawn(player, c, fresh, MenuUi, MenuMain);
         }
 
-        private void DrawPerkCard(CuiElementContainer c, string card, PerkDef p, PlayerData d, int freePts, string id, float top)
+        private void DrawPerkCard(CuiElementContainer c, string parent, string card, PerkDef p, PlayerData d, int freePts, string id, float top)
         {
             var cfg = PerkCfg(p.Id);
             var max = cfg == null ? 0 : cfg.MaxRank;
@@ -2224,31 +2443,32 @@ namespace Oxide.Plugins
             d.Perks.TryGetValue(p.Id, out rank);
             rank = Math.Min(rank, max);
 
-            Box(c, MenuMain, ColCard, 292, top - 104, 844, top, card);
-            Icon(c, card, p.Id, 12, 20, 76, 84);
-            Label(c, card, PerkName(p.Id, id), 16, 88, 74, 380, 98);
+            const float w = 814f;
+            Box(c, parent, ColCard, 0, top - 100, w, top, card);
+            Icon(c, card, p.Id, 12, 18, 76, 82);
+            Label(c, card, PerkName(p.Id, id), 16, 88, 72, 420, 96);
             for (var r = 0; r < max; r++)
                 Box(c, card, r < rank ? ColGreen : "0.32 0.32 0.32 1", 88 + r * 22, 62, 106 + r * 22, 70);
-            Label(c, card, Msg("UiRank", id, rank, max), 11, 94 + max * 22, 56, 260, 76, TextAnchor.MiddleLeft, ColMuted);
-            Label(c, card, rank > 0 ? Msg("UiNow", id, PerkDesc(p.Id, rank, id)) : Msg("UiNotYet", id), 12, 88, 32, 390, 54,
+            Label(c, card, Msg("UiRank", id, rank, max), 11, 94 + max * 22, 56, 300, 76, TextAnchor.MiddleLeft, ColMuted);
+            Label(c, card, rank > 0 ? Msg("UiNow", id, PerkDesc(p.Id, rank, id)) : Msg("UiNotYet", id), 12, 88, 32, 640, 54,
                 TextAnchor.MiddleLeft, rank > 0 ? "1 1 1 0.95" : ColMuted);
-            Label(c, card, rank < max ? Msg("UiNext", id, PerkDesc(p.Id, rank + 1, id)) : Msg("UiAllRanks", id), 12, 88, 8, 390, 30,
+            Label(c, card, rank < max ? Msg("UiNext", id, PerkDesc(p.Id, rank + 1, id)) : Msg("UiAllRanks", id), 12, 88, 8, 640, 32,
                 TextAnchor.MiddleLeft, ColMuted, false);
 
             if (!on)
-                Button(c, card, Msg("UiOff", id), 12, null, ColGray, 400, 46, 540, 86, null, ColMuted);
+                Button(c, card, Msg("UiOff", id), 12, null, ColGray, 650, 52, 800, 88, null, ColMuted);
             else if (rank >= max)
-                Button(c, card, Msg("UiMaxedBtn", id), 13, null, ColTabOn, 400, 46, 540, 86);
+                Button(c, card, Msg("UiMaxedBtn", id), 13, null, ColTabOn, 650, 52, 800, 88);
             else
             {
                 var cost = RankCost(rank + 1);
                 if (freePts >= cost)
-                    Button(c, card, Msg("UiBuy", id, rank + 1, cost), 12, "sandboxskills.ui buy " + p.Id, ColGreen, 400, 46, 540, 86);
+                    Button(c, card, Msg("UiBuy", id, rank + 1, cost), 12, "sandboxskills.ui buy " + p.Id, ColGreen, 650, 52, 800, 88);
                 else
-                    Button(c, card, Msg("UiNeed", id, cost), 12, null, ColGray, 400, 46, 540, 86, null, ColMuted);
+                    Button(c, card, Msg("UiNeed", id, cost), 12, null, ColGray, 650, 52, 800, 88, null, ColMuted);
             }
             if (rank > 0 && p.Tracked)
-                Label(c, card, Msg("UiSoFar", id, TotalText(p.Id, d, id)), 11, 330, 10, 540, 36, TextAnchor.MiddleRight, "1 0.83 0.47 1", false);
+                Label(c, card, Msg("UiSoFar", id, TotalText(p.Id, d, id)), 11, 560, 12, 800, 44, TextAnchor.MiddleRight, "1 0.83 0.47 1", false);
         }
 
         #endregion

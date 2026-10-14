@@ -35,9 +35,11 @@ public static class LaunchArguments
                 list.Add(("server.level", "Procedural Map"));
                 list.Add(("server.worldsize", s.WorldSize.ToString(CultureInfo.InvariantCulture)));
                 list.Add(("server.seed", s.Seed.ToString(CultureInfo.InvariantCulture)));
+                // The file is written into server/<identity> before each start (see WorldOptions.WriteFile).
+                if (s.World is { Enabled: true }) list.Add(("world.configfile", WorldOptions.FileName));
                 break;
             case MapMode.CustomMap:
-                list.Add(("server.levelurl", s.LevelUrl));
+                list.Add(("server.levelurl", CustomMaps.LevelUrl(s)));
                 break;
             default:
                 list.Add(("server.level", s.MapMode switch

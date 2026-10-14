@@ -51,6 +51,10 @@ public class ServerSettings
     [Range(0, int.MaxValue)] public int Seed { get; set; } = 1337;
     [Range(1000, 6000)] public int WorldSize { get; set; } = 4000;
     public string LevelUrl { get; set; } = "";
+    /// <summary>A map from the manager's map library (e.g. "Maui.map"), hosted by the manager. Empty = use LevelUrl.</summary>
+    public string CustomMapFile { get; set; } = "";
+    /// <summary>Address players download hosted maps from, e.g. http://203.0.113.5:5080. Empty = the manager's Public URL.</summary>
+    public string MapHostUrl { get; set; } = "";
     /// <summary>Optional image (e.g. exported from RustMaps) used as the live map background.</summary>
     public string MapImageUrl { get; set; } = "";
     /// <summary>True when MapImageUrl was picked up automatically from the server log (replaced on new maps).</summary>
@@ -59,6 +63,9 @@ public class ServerSettings
     [Range(0, 3000)] public int MapImageMarginMeters { get; set; } = 1000;
     /// <summary>Which map image MapImageMarginMeters was hand-tuned for. Any other image is aligned automatically.</summary>
     public string MapImageMarginSource { get; set; } = "";
+
+    /// <summary>Rust's world generation settings (biomes, roads, monuments...), used for procedural maps.</summary>
+    public WorldOptions World { get; set; } = new();
 
     // ---- Rates & stacks (RustSandboxTweaks plugin) ----
     public GameTweaks Tweaks { get; set; } = new();
@@ -132,7 +139,7 @@ public class ServerSettings
     public string MapDisplayName => MapMode switch
     {
         MapMode.Procedural => $"Procedural {WorldSize} · seed {Seed}",
-        MapMode.CustomMap => "Custom map",
+        MapMode.CustomMap => string.IsNullOrWhiteSpace(CustomMapFile) ? "Custom map" : $"{Path.GetFileNameWithoutExtension(CustomMapFile)} {WorldSize}",
         _ => MapMode.ToString(),
     };
 }

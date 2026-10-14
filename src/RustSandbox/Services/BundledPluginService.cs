@@ -34,7 +34,27 @@ public sealed record BundledPlugin(string PluginName, string Label, string Downl
     /// <summary>Custom loot tables per crate type, with Rust's own loot as the default.</summary>
     public static readonly BundledPlugin Loot = new("RustSandboxLoot", "Loot plugin", "/api/plugin/loot");
 
+    /// <summary>A pet wolf, bear, tiger, panther, boar or crocodile: follows, fights, roars, carries a backpack, fetches loot and goes down until patched up.</summary>
+    public static readonly BundledPlugin Pet = new("RustSandboxPet", "Pet plugin", "/api/plugin/pet");
+
+    /// <summary>Random weather with an on/off, a weather mix, a forecast and "change it now".</summary>
+    public static readonly BundledPlugin Weather = new("RustSandboxWeather", "Weather plugin", "/api/plugin/weather");
+
+    /// <summary>Easy NPC spawns: presets with built-in gear at monuments, picked places, road patrols and wild camps.</summary>
+    public static readonly BundledPlugin Npcs = new("RustSandboxNpcs", "NPCs plugin", "/api/plugin/npcs");
+
+    public static readonly IReadOnlyList<BundledPlugin> All =
+        new[] { EventHud, Skills, Daily, Events, Quests, Help, Recycler, Skins, Loot, Pet, Weather, Npcs };
+
+    public static BundledPlugin? Find(string pluginName) =>
+        All.FirstOrDefault(b => b.PluginName.Equals(pluginName, StringComparison.OrdinalIgnoreCase));
+
     public string FileName => PluginName + ".cs";
+
+    private string? _version;
+
+    /// <summary>The version in the copy built into this manager, from its [Info] line.</summary>
+    public string Version => _version ??= PluginService.VersionOf(ReadSource()) ?? "";
 
     public string ReadSource()
     {

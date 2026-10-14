@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Tweaks", "RustSandbox", "1.4.1")]
+    [Info("Rust Sandbox Tweaks", "RustSandbox", "1.4.3")]
     [Description("Gather rates, stack sizes, smelting, inventory sorting and furnace auto-split controlled from Rust Sandbox.")]
     public class RustSandboxTweaks : RustPlugin
     {
@@ -342,8 +342,10 @@ namespace Oxide.Plugins
             if (entity == null) return false;
             if (entity is VendingMachine || entity is ShopFront || entity is DropBox || entity is Locker || entity is BaseOven
                 || entity is Recycler || entity is ResearchTable || entity is ItemBasedFlowRestrictor) return false;
+            // A live animal can only be looted when it's a pet from RustSandboxPet, and then it's the pet's backpack.
             return entity is BoxStorage || entity is LootContainer || entity is StashContainer || entity is DroppedItemContainer
-                || entity is BuildingPrivlidge || entity is Fridge || entity.GetType() == typeof(StorageContainer);
+                || entity is BuildingPrivlidge || entity is Fridge || entity.GetType() == typeof(StorageContainer)
+                || entity is Rust.Ai.Gen2.BaseNPC2;
         }
 
         private static bool IsBackpack(Item item)
@@ -371,7 +373,7 @@ namespace Oxide.Plugins
 
         private void ShowSortButtons(BasePlayer player)
         {
-            if (player == null || !player.IsConnected || player.inventory.loot.containers.Count == 0) return;
+            if (!SortingOn || player == null || !player.IsConnected || player.inventory.loot.containers.Count == 0) return;
             CuiHelper.DestroyUi(player, SortUi);
             var x = _cfg.SortButtonX;
             var y = _cfg.SortButtonY;

@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>RustSandbox</RootNamespace>
     <AssemblyName>RustSandbox</AssemblyName>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -30,6 +30,14 @@
     <EmbeddedResource Include="..\..\plugins\RustSandboxRecycler.cs" LogicalName="RustSandboxRecycler.cs" />
     <EmbeddedResource Include="..\..\plugins\RustSandboxSkins.cs" LogicalName="RustSandboxSkins.cs" />
     <EmbeddedResource Include="..\..\plugins\RustSandboxLoot.cs" LogicalName="RustSandboxLoot.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxPet.cs" LogicalName="RustSandboxPet.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxWeather.cs" LogicalName="RustSandboxWeather.cs" />
+    <EmbeddedResource Include="..\..\plugins\RustSandboxNpcs.cs" LogicalName="RustSandboxNpcs.cs" />
+  </ItemGroup>
+
+  <!-- Maps that ship with the app (Maui is the default map). The manager hosts them for Rust to download. -->
+  <ItemGroup>
+    <Content Include="..\..\maps\**\*.map;..\..\maps\**\*.jpg;..\..\maps\**\*.png;..\..\maps\**\*.json" LinkBase="maps" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

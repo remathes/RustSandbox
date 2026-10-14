@@ -47,8 +47,18 @@ if (-not (Test-Path $icon)) {
 
 Write-Host "Publishing Rust Sandbox $Version for win-x64..." -ForegroundColor Cyan
 if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
-dotnet publish $project -c Release -r win-x64 --self-contained true -o $publish -p:Version=$Version -p:DebugType=none
-if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit code $LASTEXITCODE)." }
+# The Razor source generator sometimes crashes with a NullReferenceException inside the shared compiler
+# server (more often while Visual Studio has the project open), which then shows up as "The type 'App'
+# could not be found". Compile in-process instead, and try again if it still fails.
+dotnet build-server shutdown | Out-Null
+for ($attempt = 1; ; $attempt++) {
+    dotnet publish $project -c Release -r win-x64 --self-contained true -o $publish -p:Version=$Version -p:DebugType=none -p:UseSharedCompilation=false -p:UseRazorBuildServer=false
+    if ($LASTEXITCODE -eq 0) { break }
+    if ($attempt -ge 3) { throw "dotnet publish failed (exit code $LASTEXITCODE) after $attempt tries." }
+    Write-Host "dotnet publish failed (exit code $LASTEXITCODE); trying again ($($attempt + 1) of 3)..." -ForegroundColor Yellow
+    dotnet build-server shutdown | Out-Null
+    if (Test-Path $publish) { Remove-Item $publish -Recurse -Force }
+}
 
 # The same inputs always give the same setup file, so compiling twice and comparing catches a build
 # that got damaged while compressing (it would fail on install with "The source file is corrupted").

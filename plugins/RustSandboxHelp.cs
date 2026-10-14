@@ -14,10 +14,11 @@ using Newtonsoft.Json;
 using Oxide.Core;
 using Oxide.Game.Rust.Cui;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Help", "RustSandbox", "1.0.0")]
+    [Info("Rust Sandbox Help", "RustSandbox", "1.2.6")]
     [Description("A /help server guide listing the commands of every Rust Sandbox system, shown to new players.")]
     public class RustSandboxHelp : RustPlugin
     {
@@ -82,7 +83,7 @@ namespace Oxide.Plugins
             {
                 Title = "Skins",
                 Plugin = "RustSandboxSkins",
-                Intro = "Put any approved Rust skin on your clothes, weapons, tools and deployables, even ones you don't own on Steam. Type /skins, pick an item on the left, then click a skin. Holding an item when you open it starts on that item.",
+                Intro = "Put skins on your clothes, weapons, tools and deployables: the ones you own on Steam plus Facepunch's free ones. Type /skins, pick an item on the left, then click a skin. Holding an item when you open it starts on that item.",
                 Commands =
                 {
                     C("/skins", "Open the skin picker"),
@@ -101,9 +102,40 @@ namespace Oxide.Plugins
             },
             new Section
             {
+                Title = "Pets",
+                Plugin = "RustSandboxPet",
+                Intro = "Call your own pet with /pet and pick the animal with /pet choose: wolf, tiger or panther (fighters: /pet roar makes you hit harder and heals you) or bear, polar bear, boar or crocodile (tanks: tougher, and /pet roar pulls enemies onto it while you take less damage). It runs at your side, fights what attacks you and what you hit, and levels up the Companion skill in /skills. If it goes down, look at it and press E with a bandage, syringe or medkit to get it back up. Press E on it to open its backpack. Middle mouse: look at loot, a crate or a body to fetch it, or at an animal or NPC to attack it.",
+                Commands =
+                {
+                    C("/pet", "Call your pet, or bring it back to you"),
+                    C("/pet choose", "Pick an animal (wolf, tiger, panther, bear, polar bear, boar, crocodile)"),
+                    C("/pet bag", "Open its backpack"),
+                    C("/pet fetch", "Fetch what you look at, or the loot around you"),
+                    C("/pet attack", "Attack the animal or NPC you look at"),
+                    C("/pet stay", "Sit and wait, or follow again"),
+                    C("/pet patrol", "Roam within 30 m of you while you build, or follow again"),
+                    C("/pet roar", "Fighters: you hit harder and heal. Tanks: enemies go for it, you take less damage"),
+                    C("/pet heal", "Patch it up with a bandage, syringe or medkit (or press E on it)"),
+                    C("/pet sniff", "What's around you (Keen Nose perk)"),
+                    C("/pet dismiss", "Send it home (the backpack is kept)"),
+                    C("/pet keys", "How to put these on keys (bind g pet.fetch...)"),
+                },
+            },
+            new Section
+            {
+                Title = "Weather",
+                Plugin = "RustSandboxWeather",
+                Intro = "The weather changes on its own: clear skies, overcast, fog, rain, storms and dusty haze, fading from one to the next. You'll get a chat line when it starts to turn. Check the forecast any time.",
+                Commands =
+                {
+                    C("/weather", "What the weather is now and what's coming next"),
+                },
+            },
+            new Section
+            {
                 Title = "Skills",
                 Plugin = "RustSandboxSkills",
-                Intro = "You earn XP in ten skills just by playing: mining, woodcutting, combat, gardening, electrician, survival, mechanic, fishing, scrapper and cooking. Each level gives points to spend on perks like more ore, faster crafting or less damage. Playing solo earns bonus XP.",
+                Intro = "You earn XP in eleven skills just by playing: mining, woodcutting, combat, gardening, electrician, survival, mechanic, fishing, scrapper, cooking and companion (fighting alongside your wolf). Each level gives points to spend on perks like more ore, faster crafting or less damage. Playing solo earns bonus XP.",
                 Commands =
                 {
                     C("/skills", "Open the skills menu"),
@@ -175,6 +207,12 @@ namespace Oxide.Plugins
                     C("/questgiver look <id> <look>", "Change a quest giver's outfit"),
                     C("/questgiver outfit <id>", "Dress a quest giver in what you're wearing (skins too)"),
                     C("/hunt tp", "Teleport to your current treasure hunt clue"),
+                    C("/weather storm", "Weather now: clear, overcast, fog, rain, storm or dust [minutes]"),
+                    C("/weather random", "Back to random weather (/weather on|off turns it on or off)"),
+                    C("/npcs add <preset> [count]", "Spawn a group of NPCs where you stand (scientists, bandits, wolfpack...)"),
+                    C("/npcs remove", "Remove the nearest NPC spot (/npcs list shows them)"),
+                    C("/npcs list", "Every NPC group with its grid; /npcs go <number> teleports you there"),
+                    C("/npcs show", "Mark the NPCs near you on screen"),
                 },
             },
         };
@@ -191,6 +229,7 @@ namespace Oxide.Plugins
                 if (_config.Sections == null || _config.Sections.Count == 0) _config.Sections = DefaultSections();
                 foreach (var s in _config.Sections)
                     if (s.Commands == null) s.Commands = new List<Cmd>();
+                AddNewPages();
                 SaveConfig();
             }
             catch (Exception ex)
@@ -201,6 +240,43 @@ namespace Oxide.Plugins
         }
 
         protected override void SaveConfig() => Config.WriteObject(_config, true);
+
+        // Pages for plugins added after the config file was written, plus updates to the built-in text that changed.
+        private void AddNewPages()
+        {
+            var defaults = DefaultSections();
+            var adminAt = _config.Sections.FindIndex(x => x.AdminOnly);
+            foreach (var d in defaults.Where(x => !string.IsNullOrEmpty(x.Plugin)))
+            {
+                if (_config.Sections.Any(x => x.Plugin == d.Plugin)) continue;
+                if (adminAt < 0) _config.Sections.Add(d);
+                else _config.Sections.Insert(adminAt++, d);
+            }
+            var skins = _config.Sections.FirstOrDefault(x => x.Plugin == "RustSandboxSkins");
+            if (skins != null && skins.Intro.Contains("even ones you don't own on Steam"))
+                skins.Intro = defaults.First(x => x.Plugin == "RustSandboxSkins").Intro;
+            var wolf = _config.Sections.FirstOrDefault(x => x.Plugin == "RustSandboxPet");
+            var wolfDefault = defaults.First(x => x.Plugin == "RustSandboxPet");
+            if (wolf != null && wolf.Intro.StartsWith("Call your own wolf with /pet."))
+            {
+                wolf.Intro = wolfDefault.Intro;
+                if (wolf.Title == "Wolf companion") wolf.Title = wolfDefault.Title;
+                wolf.Commands.RemoveAll(x => x.Command == "/pet howl");
+                var call = wolf.Commands.FirstOrDefault(x => x.Command == "/pet");
+                if (call != null) call.Text = wolfDefault.Commands.First(x => x.Command == "/pet").Text;
+            }
+            if (wolf != null)
+                foreach (var c in wolfDefault.Commands)
+                    if (!wolf.Commands.Any(x => x.Command == c.Command)) wolf.Commands.Insert(Math.Max(0, wolf.Commands.Count - 2), c);
+            var skillsPage = _config.Sections.FirstOrDefault(x => x.Plugin == "RustSandboxSkills");
+            if (skillsPage != null && skillsPage.Intro.StartsWith("You earn XP in ten skills"))
+                skillsPage.Intro = defaults.First(x => x.Plugin == "RustSandboxSkills").Intro;
+            var admin = _config.Sections.FirstOrDefault(x => x.AdminOnly);
+            var adminDefault = defaults.FirstOrDefault(x => x.AdminOnly);
+            if (admin != null && adminDefault != null)
+                foreach (var c in adminDefault.Commands)
+                    if (!admin.Commands.Any(x => x.Command == c.Command)) admin.Commands.Add(c);
+        }
 
         #endregion
 
@@ -220,7 +296,7 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            foreach (var p in BasePlayer.activePlayerList) CuiHelper.DestroyUi(p, Root);
+            foreach (var p in BasePlayer.activePlayerList) Close(p);
         }
 
         #endregion
@@ -245,7 +321,9 @@ namespace Oxide.Plugins
 
         private void OnPlayerDisconnected(BasePlayer player, string reason)
         {
-            if (player != null) _tipped.Remove(player.userID);
+            if (player == null) return;
+            _tipped.Remove(player.userID);
+            _shown.Remove(player.userID);
         }
 
         [ChatCommand("help")]
@@ -270,14 +348,14 @@ namespace Oxide.Plugins
                 {
                     var page = arg.GetInt(1);
                     var row = arg.GetInt(2);
-                    CuiHelper.DestroyUi(player, Root);
+                    Close(player);
                     if (page < 0 || page >= visible.Count || row < 0 || row >= visible[page].Commands.Count) return;
                     var cmd = visible[page].Commands[row].Command;
                     if (Runnable(cmd)) player.SendConsoleCommand("chat.say", cmd);
                     return;
                 }
                 default:
-                    CuiHelper.DestroyUi(player, Root);
+                    Close(player);
                     return;
             }
         }
@@ -296,6 +374,42 @@ namespace Oxide.Plugins
         private const string Root = "SandboxHelp.Root";
         private const string Main = Root + ".Main";
 
+        // Players whose backdrop (the part that frees the mouse) is on screen. Changing page only replaces the window
+        // inside it: destroying and re-adding the backdrop made the game grab the mouse and re-centre it on every click.
+        private readonly HashSet<ulong> _shown = new HashSet<ulong>();
+
+
+        // The first draw (the window together with the backdrop that frees the mouse) comes out blurry in game until
+        // the window is drawn again, which is what clicking anything did. So the window is sent once more a moment
+        // after it opens, unless something newer was drawn in the meantime.
+        private readonly Dictionary<ulong, int> _draws = new Dictionary<ulong, int>();
+
+        private void Drawn(BasePlayer player, CuiElementContainer ui, bool fresh, string root, string main)
+        {
+            int n;
+            _draws.TryGetValue(player.userID, out n);
+            _draws[player.userID] = ++n;
+            if (!fresh) return;
+            var again = new CuiElementContainer();
+            again.AddRange(ui.Where(e => e.Name == main || e.Name != root && e.Parent != root));
+            timer.Once(0.2f, () =>
+            {
+                int now;
+                if (player == null || !player.IsConnected || !_draws.TryGetValue(player.userID, out now) || now != n) return;
+                if (!StillOpen(player)) return;
+                CuiHelper.DestroyUi(player, main);
+                CuiHelper.AddUi(player, again);
+            });
+        }
+
+        private bool StillOpen(BasePlayer player) => _shown.Contains(player.userID);
+
+        private void Close(BasePlayer player)
+        {
+            _shown.Remove(player.userID);
+            CuiHelper.DestroyUi(player, Root);
+        }
+
         private void Open(BasePlayer player, int page)
         {
             if (player == null || !player.IsConnected) return;
@@ -305,12 +419,14 @@ namespace Oxide.Plugins
             var s = sections[page];
 
             var ui = new CuiElementContainer();
-            ui.Add(new CuiPanel
-            {
-                Image = { Color = "0 0 0 0.55" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                CursorEnabled = true,
-            }, "Overlay", Root);
+            var fresh = _shown.Add(player.userID);
+            if (fresh)
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = "0 0 0 0.55" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                    CursorEnabled = true,
+                }, "Overlay", Root);
             ui.Add(new CuiPanel
             {
                 Image = { Color = "0.10 0.10 0.10 0.98" },
@@ -326,37 +442,78 @@ namespace Oxide.Plugins
 
             // page list
             Box(ui, Main, "0.07 0.07 0.07 1", 12, 12, 202, 442);
+            // Rows shrink to fit when there are more pages than the list has room for at full size.
+            var step = Mathf.Min(38f, 426f / Mathf.Max(1, sections.Count));
+            var height = step - 4f;
+            var font = step >= 34f ? 13 : 12;
             var y = 442f;
-            for (var i = 0; i < sections.Count && i < 11; i++)
+            for (var i = 0; i < sections.Count; i++)
             {
-                y -= 38;
+                y -= step;
                 var on = i == page;
-                Button(ui, Main, sections[i].Title, 13, $"sandboxhelp.ui page {i}", on ? "0.24 0.20 0.12 1" : "0.13 0.13 0.13 1", 16, y, 198, y + 34, TextAnchor.MiddleLeft);
-                if (on) Box(ui, Main, "0.94 0.69 0.29 1", 16, y, 19, y + 34);
+                Button(ui, Main, sections[i].Title, font, $"sandboxhelp.ui page {i}", on ? "0.24 0.20 0.12 1" : "0.13 0.13 0.13 1", 16, y, 198, y + height, TextAnchor.MiddleLeft);
+                if (on) Box(ui, Main, "0.94 0.69 0.29 1", 16, y, 19, y + height);
             }
 
             // page content
             Label(ui, Main, s.Title, 20, 220, 408, 808, 442);
             Label(ui, Main, s.Intro, 13, 220, 330, 808, 406, TextAnchor.UpperLeft, "0.82 0.82 0.82 1");
-            y = 320f;
-            for (var r = 0; r < s.Commands.Count && r < 9; r++)
+            // Commands scroll when there are more than fit (the admin page has lots), above the footer line.
+            const float listBottom = 40f, listTop = 322f, rowStep = 34f, rowH = 30f;
+            var viewH = listTop - listBottom;
+            var contentH = Mathf.Max(viewH, s.Commands.Count * rowStep);
+            var list = Main + ".List";
+            ui.Add(new CuiElement
+            {
+                Name = list,
+                Parent = Main,
+                Components =
+                {
+                    // The wheel only scrolls while the pointer is over something that catches it, so the whole
+                    // view gets an (almost) invisible background.
+                    new CuiImageComponent { Color = "0 0 0 0.01" },
+                    new CuiScrollViewComponent
+                    {
+                        Vertical = true,
+                        Horizontal = false,
+                        MovementType = ScrollRect.MovementType.Clamped,
+                        ScrollSensitivity = 40f,
+                        Inertia = false,
+                        ContentTransform = new CuiRectTransform { AnchorMin = "0 1", AnchorMax = "1 1", OffsetMin = $"0 {-contentH}", OffsetMax = "0 0" },
+                        VerticalScrollbar = new CuiScrollbar { Size = 6f, AutoHide = true, HandleColor = "0.55 0.55 0.55 0.9", HighlightColor = "0.7 0.7 0.7 1", PressedColor = "0.8 0.8 0.8 1", TrackColor = "0.1 0.1 0.1 0.6" },
+                    },
+                    new CuiRectTransformComponent { AnchorMin = "0 0", AnchorMax = "0 0", OffsetMin = $"220 {listBottom}", OffsetMax = $"808 {listTop}" },
+                },
+            });
+            for (var r = 0; r < s.Commands.Count; r++)
             {
                 var c = s.Commands[r];
-                y -= 34;
-                Box(ui, Main, r % 2 == 0 ? "0.13 0.13 0.13 1" : "0.11 0.11 0.11 1", 220, y, 808, y + 30);
-                Label(ui, Main, Escape(c.Command), 13, 230, y, 470, y + 30, TextAnchor.MiddleLeft, "0.94 0.69 0.29 1");
-                Label(ui, Main, c.Text, 12, 475, y, Runnable(c.Command) ? 730 : 800, y + 30, TextAnchor.MiddleLeft, "0.85 0.85 0.85 1");
-                if (Runnable(c.Command) && c.Command != "/help")
-                    Button(ui, Main, "RUN", 11, $"sandboxhelp.ui run {page} {r}", "0.42 0.63 0.24 0.95", 738, y + 4, 802, y + 26);
+                var top = contentH - r * rowStep;
+                var bottom = top - rowH;
+                var run = Runnable(c.Command) && c.Command != "/help";
+                Box(ui, list, r % 2 == 0 ? "0.13 0.13 0.13 1" : "0.11 0.11 0.11 1", 0, bottom, 578, top);
+                Label(ui, list, Escape(c.Command), 13, 10, bottom, 250, top, TextAnchor.MiddleLeft, "0.94 0.69 0.29 1");
+                Label(ui, list, c.Text, 12, 255, bottom, run ? 504 : 572, top, TextAnchor.MiddleLeft, "0.85 0.85 0.85 1");
+                if (run)
+                    Button(ui, list, "RUN", 11, $"sandboxhelp.ui run {page} {r}", "0.42 0.63 0.24 0.95", 510, bottom + 4, 572, top - 4);
             }
-            Label(ui, Main, "Type /help any time to open this guide.", 11, 220, 14, 808, 34, TextAnchor.MiddleRight, "0.55 0.55 0.55 1");
+            var more = s.Commands.Count * rowStep > viewH ? "Scroll for more commands.  " : "";
+            Label(ui, Main, more + "Type /help any time to open this guide.", 11, 220, 12, 808, 34, TextAnchor.MiddleRight, "0.55 0.55 0.55 1");
 
-            CuiHelper.DestroyUi(player, Root);
+            CuiHelper.DestroyUi(player, fresh ? Root : Main);
             CuiHelper.AddUi(player, ui);
+            Drawn(player, ui, fresh, Root, Main);
         }
 
-        /// <summary>Unity's rich text would treat "&lt;skill&gt;" as a tag and hide it.</summary>
-        private static string Escape(string s) => (s ?? "").Replace("<", "<noparse><</noparse>");
+        /// <summary>Rust's UI text only treats real tags (b, i, size, color) as markup, so "&lt;name&gt;" already shows as typed.
+        /// It doesn't know &lt;noparse&gt;, which printed literally. Only those real tags need breaking up.</summary>
+        private static string Escape(string s)
+        {
+            s = s ?? "";
+            foreach (var tag in new[] { "b>", "i>", "size", "color", "material", "quad", "/b>", "/i>", "/size", "/color" })
+                s = s.Replace("<" + tag, "<\u200B" + tag);
+            return s;
+        }
 
         private static void Box(CuiElementContainer c, string parent, string color, float x0, float y0, float x1, float y1)
         {

@@ -15,7 +15,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Skins", "RustSandbox", "1.1.0")]
+    [Info("Rust Sandbox Skins", "RustSandbox", "1.1.2")]
     [Description("A skin picker for players' clothes, weapons and items, using every approved Rust skin.")]
     public class RustSandboxSkins : RustPlugin
     {
@@ -163,12 +163,22 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            foreach (var p in BasePlayer.activePlayerList) CuiHelper.DestroyUi(p, Ui);
+            foreach (var p in BasePlayer.activePlayerList) Close(p);
+        }
+
+        // Players whose backdrop (the part that frees the mouse) is on screen. Redraws only replace the window inside
+        // it: destroying and re-adding the backdrop made the game grab the mouse and re-centre it on every click.
+        private readonly HashSet<ulong> _shown = new HashSet<ulong>();
+
+        private void Close(BasePlayer player)
+        {
+            _shown.Remove(player.userID.Get());
+            CuiHelper.DestroyUi(player, Ui);
         }
 
         private void OnPlayerDisconnected(BasePlayer player)
         {
-            CuiHelper.DestroyUi(player, Ui);
+            Close(player);
             _state.Remove(player.userID.Get());
         }
 
@@ -214,7 +224,7 @@ namespace Oxide.Plugins
             switch (arg.GetString(0))
             {
                 case "close":
-                    CuiHelper.DestroyUi(player, Ui);
+                    Close(player);
                     return;
                 case "item":
                     s.ItemUid = arg.GetULong(1);
@@ -266,9 +276,35 @@ namespace Oxide.Plugins
 
         #region UI
 
+
+        // The first draw (the window together with the backdrop that frees the mouse) comes out blurry in game until
+        // the window is drawn again, which is what clicking anything did. So the window is sent once more a moment
+        // after it opens, unless something newer was drawn in the meantime.
+        private readonly Dictionary<ulong, int> _draws = new Dictionary<ulong, int>();
+
+        private void Drawn(BasePlayer player, CuiElementContainer ui, bool fresh, string root, string main)
+        {
+            int n;
+            _draws.TryGetValue(player.userID, out n);
+            _draws[player.userID] = ++n;
+            if (!fresh) return;
+            var again = new CuiElementContainer();
+            again.AddRange(ui.Where(e => e.Name == main || e.Name != root && e.Parent != root));
+            timer.Once(0.2f, () =>
+            {
+                int now;
+                if (player == null || !player.IsConnected || !_draws.TryGetValue(player.userID, out now) || now != n) return;
+                if (!StillOpen(player)) return;
+                CuiHelper.DestroyUi(player, main);
+                CuiHelper.AddUi(player, again);
+            });
+        }
+
+        private bool StillOpen(BasePlayer player) => _shown.Contains(player.userID.Get());
+
         private void Draw(BasePlayer player)
         {
-            CuiHelper.DestroyUi(player, Ui);
+            var fresh = _shown.Add(player.userID.Get());
             var s = StateOf(player);
             var owned = OwnedIds(player);
             var items = AllItems(player).Where(i => Skinnable(player, i, owned)).ToList();
@@ -276,13 +312,14 @@ namespace Oxide.Plugins
             if (item == null && items.Count > 0) { item = items[0]; s.ItemUid = item.uid.Value; }
 
             var ui = new CuiElementContainer();
-            ui.Add(new CuiPanel
-            {
-                Image = { Color = "0 0 0 0.6" },
-                RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
-                CursorEnabled = true,
-                KeyboardEnabled = true,
-            }, "Overlay", Ui);
+            if (fresh)
+                ui.Add(new CuiPanel
+                {
+                    Image = { Color = "0 0 0 0.6" },
+                    RectTransform = { AnchorMin = "0 0", AnchorMax = "1 1" },
+                    CursorEnabled = true,
+                    KeyboardEnabled = true,
+                }, "Overlay", Ui);
             var main = Ui + ".Main";
             ui.Add(new CuiPanel
             {
@@ -321,7 +358,9 @@ namespace Oxide.Plugins
             ui.Add(new CuiPanel { Image = { Color = "1 1 1 0.08" }, RectTransform = { AnchorMin = "0 0", AnchorMax = "0 1", OffsetMin = "226 12", OffsetMax = "227 -44" } }, main);
 
             if (item != null) DrawSkins(ui, main, item, s, Available(player, item.info, owned));
+            CuiHelper.DestroyUi(player, fresh ? Ui : main);
             CuiHelper.AddUi(player, ui);
+            Drawn(player, ui, fresh, Ui, main);
         }
 
         private void DrawSkins(CuiElementContainer ui, string main, Item item, State s, List<SkinEntry> all)
