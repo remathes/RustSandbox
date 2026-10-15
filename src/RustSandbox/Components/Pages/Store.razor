@@ -1,0 +1,525 @@
+@page "/s/{Id:int}/store"
+@inherits ServerPageBase
+@inject StoreService StoreApi
+@inject TweaksService Tweaks
+@using System.Globalization
+
+<PageTitle>@(Server?.Name ?? "Server") · Store</PageTitle>
+
+@if (Server is not null)
+{
+    <div class="page">
+        <div class="page-head">
+            <div class="grow">
+                <h1>Store</h1>
+                <p>Rust Credits that players earn for kills, gathering, farming, fishing and keycard puzzles, and shopkeepers in the world who sell items for them. Press E on a shopkeeper for a store with pages of items, a cart and a checkout. Players type <code>/credits</code> for their balance and where the stores are.</p>
+            </div>
+            @if (_status is not null)
+            {
+                <span class="badge good">Plugin v@(_status.Version) · @_status.Vendors.Count(v => v.OnMap) shopkeepers</span>
+            }
+            else if (Runtime.IsOnline && _loaded)
+            {
+                <span class="badge warn">Plugin not loaded</span>
+            }
+            <button class="btn" @onclick="LoadAsync" disabled="@_busy">Refresh</button>
+        </div>
+
+        @if (Runtime.IsOnline && _status is null && _loaded)
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">The Store plugin didn't answer. Install it from <a href="s/@Id/telemetry">Telemetry → Store</a>, then refresh.</div>
+        }
+        @if (_status is { MissingItems.Count: > 0 })
+        {
+            <div class="callout warn" style="margin-bottom:var(--gap)">These items don't exist in this Rust version and are hidden in game: @string.Join(", ", _status.MissingItems). Fix or remove them on the Shops tab.</div>
+        }
+
+        <div class="tabs" role="tablist">
+            <button class="@(_tab == "overview" ? "on" : "")" @onclick='() => _tab = "overview"'>Players &amp; shopkeepers</button>
+            <button class="@(_tab == "shops" ? "on" : "")" @onclick='() => _tab = "shops"'>Shops &amp; prices</button>
+            <button class="@(_tab == "earn" ? "on" : "")" @onclick='() => _tab = "earn"'>Earning</button>
+            <button class="@(_tab == "settings" ? "on" : "")" @onclick='() => _tab = "settings"'>Settings</button>
+        </div>
+
+        @if (_tab == "overview")
+        {
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head"><h2>Strip malls</h2></div>
+                <div class="panel-body">
+                    <div class="callout warn" style="margin-bottom:var(--gap)"><strong>Pick the spot first:</strong> find a flat, open stretch of ground with lots of room. All four shops need about 40 m across and 16 m deep in front of you, clear of trees, rocks, water and anyone's base. On a slope the shops stand on stilts, and the build is refused if the ground drops more than 2.5 m.</div>
+                    <p class="muted" style="margin-top:0">Stand facing where the shops should go and type <code>/store build</code> in game. It builds a row of wooden shops (one per open shop, 9 × 9 m each) about 6 m in front of you, with a counter and shopkeeper, guns on wall racks, clothes on mannequins, floor displays and a lit neon sign over each door. Players can't break, loot or build onto it. <code>/store build guns clothes</code> builds just those, <code>/store unbuild</code> removes the nearest, <code>/store rebuild</code> refreshes displays after you change them here.</p>
+                    @if (_status is null || _status.Malls.Count == 0)
+                    {
+                        <div class="empty">No strip malls yet.</div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Id</th><th>Shops</th><th>Where</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var m in _status.Malls)
+                                {
+                                    var mall = m;
+                                    <tr>
+                                        <td>@m.Id</td>
+                                        <td>@string.Join(", ", m.Shops.Select(ShopName))</td>
+                                        <td>@(m.OnMap ? m.Grid : "Built on another map")</td>
+                                        <td><button class="btn sm ghost" @onclick="() => RemoveMallAsync(mall)" disabled="@_busy"><Icon Name="trash" /> Remove</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head">
+                    <h2>Shopkeepers</h2>
+                    <span class="spacer"></span>
+                    @if (_status is not null)
+                    {
+                        <button class="btn sm" @onclick="RespawnAsync" disabled="@_busy">Respawn all</button>
+                    }
+                </div>
+                <div class="panel-body">
+                    <p class="muted" style="margin-top:0">Shopkeepers are placed in game by an admin: stand where one should go and type <code>/store add guns</code> (or clothes, hardware, farmers), or <code>/store add all</code> for one of each in a row. One placed inside a monument such as Outpost is saved relative to it and comes back at the same spot after a wipe. <code>/store remove</code>, <code>/store move &lt;id&gt;</code> and <code>/store outfit &lt;id&gt;</code> (copies what you're wearing) tidy up.</p>
+                    @if (_status is null)
+                    {
+                        <div class="empty">Start the server to see the shopkeepers.</div>
+                    }
+                    else if (_status.Vendors.Count == 0)
+                    {
+                        <div class="empty">No shopkeepers yet.</div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>Id</th><th>Name</th><th>Shop</th><th>Where</th></tr></thead>
+                            <tbody>
+                                @foreach (var v in _status.Vendors)
+                                {
+                                    <tr>
+                                        <td>@v.Id</td>
+                                        <td>@v.Name</td>
+                                        <td>@ShopName(v.Shop)</td>
+                                        <td>@(v.OnMap ? v.Grid : "Not on this map") @if (v.Monument.Length > 0) { <span class="muted">· @v.Monument</span> }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+
+            <section class="panel" style="margin-bottom:var(--gap)">
+                <div class="panel-head">
+                    <h2>Balances</h2>
+                    <span class="spacer"></span>
+                    @if (_status is not null)
+                    {
+                        <span class="muted">@_status.TotalCredits.ToString("N0") @_status.Short in circulation</span>
+                    }
+                </div>
+                <div class="panel-body">
+                    @if (_status is null || _status.Players.Count == 0)
+                    {
+                        <div class="empty">Nobody has earned credits yet.</div>
+                    }
+                    else
+                    {
+                        <div class="row" style="margin-bottom:.6rem;gap:8px;flex-wrap:wrap">
+                            <span class="muted">Amount</span>
+                            <input class="input" type="number" min="0" style="width:7rem" @bind="_amount" />
+                            <span class="muted">then Give, Take or Set on a player's row.</span>
+                        </div>
+                        <div class="table-wrap">
+                            <table class="table">
+                                <thead><tr><th>Player</th><th class="num">Balance</th><th class="num">Earned</th><th class="num">Spent</th><th>Earned from</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var p in _status.Players)
+                                    {
+                                        var pl = p;
+                                        <tr>
+                                            <td>@(string.IsNullOrEmpty(p.Name) ? p.Id : p.Name) @if (p.Online) { <span class="badge good">online</span> }</td>
+                                            <td class="num"><b>@p.Balance.ToString("N0")</b></td>
+                                            <td class="num">@p.Earned.ToString("N0")</td>
+                                            <td class="num">@p.Spent.ToString("N0")</td>
+                                            <td class="muted">@string.Join(", ", p.EarnedBy.OrderByDescending(e => e.Value).Select(e => $"{Why(e.Key)} {e.Value:0}"))</td>
+                                            <td style="white-space:nowrap">
+                                                <button class="btn sm" @onclick='() => CreditsAsync(pl, "give")' disabled="@_busy">Give</button>
+                                                <button class="btn sm" @onclick='() => CreditsAsync(pl, "take")' disabled="@_busy">Take</button>
+                                                <button class="btn sm ghost" @onclick='() => CreditsAsync(pl, "set")' disabled="@_busy">Set</button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head"><h2>Recent purchases and payments</h2></div>
+                <div class="panel-body">
+                    @if (_status is null || _status.Log.Count == 0)
+                    {
+                        <div class="empty">Nothing yet.</div>
+                    }
+                    else
+                    {
+                        <table class="table">
+                            <thead><tr><th>When</th><th>Player</th><th class="num">@_status.Short</th><th>What</th></tr></thead>
+                            <tbody>
+                                @foreach (var l in _status.Log)
+                                {
+                                    <tr>
+                                        <td class="muted" style="white-space:nowrap">@l.Time.ToLocalTime().ToString("g")</td>
+                                        <td>@l.Name</td>
+                                        <td class="num">@l.Amount.ToString("N0")</td>
+                                        <td>@KindLabel(l.Kind) @l.Text</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </section>
+        }
+        else if (_configError is not null)
+        {
+            <div class="callout warn">@_configError</div>
+        }
+        else if (_config is null)
+        {
+            <div class="callout">The Store plugin writes its settings the first time it loads. Install it from <a href="s/@Id/telemetry">Telemetry → Store</a> and start the server once, then refresh this page.</div>
+        }
+        else
+        {
+            <div class="row" style="margin-bottom:var(--gap);flex-wrap:wrap">
+                <p class="muted" style="margin:0;flex:1">Saving reloads the plugin, which puts the shopkeepers back and empties open carts. Balances are kept.</p>
+                @if (_dirty)
+                {
+                    <button class="btn ghost" @onclick="LoadAsync" disabled="@_busy">Discard</button>
+                }
+                <button class="btn primary" @onclick="SaveAsync" disabled="@(_busy || !_dirty)"><Icon Name="save" /> Save &amp; reload</button>
+            </div>
+
+            @if (_tab == "shops")
+            {
+                <div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:var(--gap)">
+                    @foreach (var s in _config.Shops)
+                    {
+                        var sh = s;
+                        <button class="btn @(_shop == sh ? "primary" : "")" @onclick="() => _shop = sh">@(string.IsNullOrEmpty(sh.Name) ? sh.Id : sh.Name) <span class="muted">(@sh.Items.Count)</span></button>
+                    }
+                    <button class="btn ghost" @onclick="AddShop"><Icon Name="plus" /> New shop</button>
+                </div>
+
+                @if (_shop is not null)
+                {
+                    var shop = _shop;
+                    <section class="panel" style="margin-bottom:var(--gap)">
+                        <div class="panel-head">
+                            <h2>@shop.Name</h2>
+                            <span class="spacer"></span>
+                            <button class="btn sm ghost" @onclick="() => _removeShop = shop">Remove shop</button>
+                        </div>
+                        <div class="panel-body form-grid">
+                            <label class="field"><span>Shop name</span><input class="input" value="@shop.Name" @onchange="e => { shop.Name = e.Value?.ToString() ?? string.Empty; _dirty = true; }" /></label>
+                            <label class="field"><span>Shopkeeper's name</span><input class="input" value="@shop.Keeper" @onchange="e => { shop.Keeper = e.Value?.ToString() ?? string.Empty; _dirty = true; }" /></label>
+                            <label class="field"><span>Id <small class="muted">(for /store add @shop.Id)</small></span><input class="input" value="@shop.Id" @onchange="e => { shop.Id = (e.Value?.ToString() ?? string.Empty).Trim().ToLowerInvariant().Replace(' ', '-'); _dirty = true; }" /></label>
+                            <label class="field"><span>Shopkeeper look</span>
+                                <select class="input" value="@shop.Look" @onchange="e => { shop.Look = e.Value?.ToString() ?? StoreService.Looks[0]; _dirty = true; }">
+                                    @foreach (var look in StoreService.Looks)
+                                    {
+                                        <option value="@look">@look.Replace('_', ' ')</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="field"><span>Colour</span><input class="input" type="color" value="@StoreService.ToHex(shop.Color)" @onchange="e => { shop.Color = StoreService.FromHex(e.Value?.ToString() ?? string.Empty); _dirty = true; }" /></label>
+                            <label class="check"><input type="checkbox" checked="@shop.Enabled" @onchange="e => { shop.Enabled = e.Value is true; _dirty = true; }" /><span><b>Open</b><small>Closed shops have no shopkeepers.</small></span></label>
+                            <label class="check"><input type="checkbox" checked="@(shop.Outdoor == true)" @onchange="e => { shop.Outdoor = e.Value is true; _dirty = true; }" /><span><b>Open-air stall</b><small>No walls or roof, like the Farmers Market. Seeds grow in planters and food sits on market tables.</small></span></label>
+                        </div>
+                    </section>
+
+                    <section class="panel">
+                        <div class="panel-head">
+                            <h2>Items for sale</h2>
+                            <span class="spacer"></span>
+                            <button class="btn sm primary" @onclick="() => _gallery = true"><Icon Name="plus" /> Add items</button>
+                        </div>
+                        <div class="panel-body">
+                            <p class="muted" style="margin-top:0">Amount is how many come in one purchase. Items with the same category share a tab in the store. Prices are in @_config.Short.</p>
+                            <div class="table-wrap">
+                                <table class="table">
+                                    <thead><tr><th></th><th>Item</th><th>Category</th><th class="num">Amount</th><th class="num">Price</th><th>Blueprint</th><th></th></tr></thead>
+                                    <tbody>
+                                        @for (var n = 0; n < shop.Items.Count; n++)
+                                        {
+                                            var it = shop.Items[n];
+                                            var idx = n;
+                                            <tr>
+                                                <td><img class="item-icon" src="api/servers/@Id/item-icon/@it.Item" alt="" width="32" height="32" loading="lazy" onerror="this.style.visibility='hidden'" /></td>
+                                                <td>
+                                                    <div>@NameOf(it.Item)</div>
+                                                    <input class="input" style="width:12rem;font-size:.85em" value="@it.Item" title="Shortname" @onchange="e => { it.Item = e.Value?.ToString() ?? string.Empty; _dirty = true; }" />
+                                                </td>
+                                                <td><input class="input" style="width:8rem" list="store-cats" value="@it.Category" @onchange="e => { it.Category = e.Value?.ToString() ?? string.Empty; _dirty = true; }" /></td>
+                                                <td class="num"><input class="input" type="number" min="1" style="width:6rem" value="@it.Amount" @onchange="e => { it.Amount = Int(e, it.Amount); _dirty = true; }" /></td>
+                                                <td class="num"><input class="input" type="number" min="0" style="width:6rem" value="@it.Price" @onchange="e => { it.Price = Int(e, it.Price); _dirty = true; }" /></td>
+                                                <td><input type="checkbox" checked="@it.Blueprint" @onchange="e => { it.Blueprint = e.Value is true; _dirty = true; }" /></td>
+                                                <td style="white-space:nowrap">
+                                                    <button class="btn sm ghost" title="Move up" @onclick="() => Move(shop, idx, -1)" disabled="@(idx == 0)">▲</button>
+                                                    <button class="btn sm ghost" title="Move down" @onclick="() => Move(shop, idx, 1)" disabled="@(idx == shop.Items.Count - 1)">▼</button>
+                                                    <button class="btn sm ghost" title="Remove" @onclick="() => { shop.Items.RemoveAt(idx); _dirty = true; }"><Icon Name="trash" /></button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <h3 style="margin-top:1.2rem">Neon sign</h3>
+                            <NeonSignEditor Shop="shop" OnChanged="() => _dirty = true" />
+                            <h3 style="margin-top:1.2rem">Strip mall displays</h3>
+                            <p class="muted" style="margin-top:0">One display per line. A gun or tool goes on a wall rack (up to 6 racks); a comma list of clothes dresses a mannequin, like <code>hoodie,pants,shoes.boots</code>; anything else you can place (solar panel, planter, box...) stands on the floor (up to 8). In an open-air stall a seed like <code>seed.corn</code> becomes a planter of ripe crops (up to 4) and a comma list of food, like <code>corn,pumpkin,apple</code>, is laid out on a market table (up to 2). Type <code>/store rebuild</code> in game after saving to see changes.</p>
+                            <textarea class="input" rows="8" style="width:100%;font-family:var(--font-mono, monospace)" @onchange="e => { shop.Displays = (e.Value?.ToString() ?? string.Empty).Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList(); _dirty = true; }">@string.Join("\n", shop.Displays)</textarea>
+                            <datalist id="store-cats">
+                                @foreach (var c in shop.Items.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c)).Distinct())
+                                {
+                                    <option value="@c"></option>
+                                }
+                            </datalist>
+                        </div>
+                    </section>
+                }
+            }
+            else if (_tab == "earn")
+            {
+                var e = _config.Earn;
+                <section class="panel" style="margin-bottom:var(--gap)">
+                    <div class="panel-head"><h2>Kills</h2></div>
+                    <div class="panel-body">
+                        <div class="form-grid">
+                            <label class="field"><span>Another player</span><input class="input" type="number" step="0.5" value="@D(e.PlayerKill)" @onchange="x => { e.PlayerKill = Dbl(x, e.PlayerKill); _dirty = true; }" /></label>
+                            <label class="field"><span>Minutes before the same player pays again</span><input class="input" type="number" step="1" value="@D(e.PlayerKillCooldownMinutes)" @onchange="x => { e.PlayerKillCooldownMinutes = Dbl(x, e.PlayerKillCooldownMinutes); _dirty = true; }" /></label>
+                            <label class="field"><span>Scientist or other NPC</span><input class="input" type="number" step="0.5" value="@D(e.NpcKill)" @onchange="x => { e.NpcKill = Dbl(x, e.NpcKill); _dirty = true; }" /></label>
+                            <label class="field"><span>Animal</span><input class="input" type="number" step="0.5" value="@D(e.AnimalKill)" @onchange="x => { e.AnimalKill = Dbl(x, e.AnimalKill); _dirty = true; }" /></label>
+                        </div>
+                        <h3 style="margin-top:1rem">Special kills <small class="muted">(by prefab name, overrides the above)</small></h3>
+                        <RatesTable Values="e.Kills" Placeholder="e.g. bradleyapc" OnChanged="() => _dirty = true" />
+                    </div>
+                </section>
+                <section class="panel" style="margin-bottom:var(--gap)">
+                    <div class="panel-head"><h2>Gathering</h2></div>
+                    <div class="panel-body">
+                        <p class="muted" style="margin-top:0">Credits per 100 of each resource gathered with a tool (trees, ore nodes, animal bodies). Whoever does the gathering gets paid.</p>
+                        <RatesTable Values="e.GatherPer100" Placeholder="e.g. cloth" OnChanged="() => _dirty = true" />
+                    </div>
+                </section>
+                <section class="panel">
+                    <div class="panel-head"><h2>Farming, fishing and keycards</h2></div>
+                    <div class="panel-body">
+                        <div class="form-grid">
+                            <label class="field"><span>Harvesting a plant</span><input class="input" type="number" step="0.1" value="@D(e.FarmHarvest)" @onchange="x => { e.FarmHarvest = Dbl(x, e.FarmHarvest); _dirty = true; }" /></label>
+                            <label class="field"><span>Picking something up (hemp, mushrooms, berries…)</span><input class="input" type="number" step="0.1" value="@D(e.Pickup)" @onchange="x => { e.Pickup = Dbl(x, e.Pickup); _dirty = true; }" /></label>
+                            <label class="field"><span>Catching a fish</span><input class="input" type="number" step="0.5" value="@D(e.Fish)" @onchange="x => { e.Fish = Dbl(x, e.Fish); _dirty = true; }" /></label>
+                            <label class="field"><span>Fishing up junk</span><input class="input" type="number" step="0.5" value="@D(e.FishJunk)" @onchange="x => { e.FishJunk = Dbl(x, e.FishJunk); _dirty = true; }" /></label>
+                            <label class="field"><span>Minutes before the same card reader pays again</span><input class="input" type="number" step="1" value="@D(e.KeycardCooldownMinutes)" @onchange="x => { e.KeycardCooldownMinutes = Dbl(x, e.KeycardCooldownMinutes); _dirty = true; }" /></label>
+                        </div>
+                        <h3 style="margin-top:1rem">Keycard puzzles <small class="muted">(paid when the card opens the door)</small></h3>
+                        <RatesTable Values="e.Keycards" Placeholder="green, blue or red" OnChanged="() => _dirty = true" />
+                    </div>
+                </section>
+            }
+            else if (_tab == "settings")
+            {
+                <section class="panel">
+                    <div class="panel-head"><h2>Settings</h2></div>
+                    <div class="panel-body form-grid">
+                        <label class="check wide"><input type="checkbox" checked="@_config.Enabled" @onchange="e => { _config.Enabled = e.Value is true; _dirty = true; }" /><span><b>Store and credits on</b><small>Off: nobody earns credits and the shopkeepers say the stores are closed.</small></span></label>
+                        <label class="field"><span>Currency name</span><input class="input" value="@_config.CurrencyName" @onchange="e => { _config.CurrencyName = e.Value?.ToString() ?? string.Empty; _dirty = true; }" /></label>
+                        <label class="field"><span>Short name</span><input class="input" value="@_config.Short" @onchange="e => { _config.Short = e.Value?.ToString() ?? string.Empty; _dirty = true; }" /></label>
+                        <label class="field"><span>Credits a new player starts with</span><input class="input" type="number" value="@D(_config.StartingBalance)" @onchange="e => { _config.StartingBalance = Dbl(e, _config.StartingBalance); _dirty = true; }" /></label>
+                        <label class="field"><span>Most of one item per checkout</span><input class="input" type="number" min="1" max="100" value="@_config.MaxPerLine" @onchange="e => { _config.MaxPerLine = Int(e, _config.MaxPerLine); _dirty = true; }" /></label>
+                        <label class="check wide"><input type="checkbox" checked="@_config.ShowEarnings" @onchange="e => { _config.ShowEarnings = e.Value is true; _dirty = true; }" /><span><b>Show "+5 RC" pop-ups</b><small>A small note at the top of the screen when a player earns credits.</small></span></label>
+                        <label class="check wide"><input type="checkbox" checked="@_config.AllowPay" @onchange="e => { _config.AllowPay = e.Value is true; _dirty = true; }" /><span><b>Players can pay each other</b><small><code>/credits pay &lt;player&gt; &lt;amount&gt;</code></small></span></label>
+                        <label class="field"><span>Strip mall built from</span>
+                            <select class="input" value="@_config.BuildGrade" @onchange='e => { _config.BuildGrade = e.Value?.ToString() ?? "Wood"; _dirty = true; }'>
+                                <option value="Wood">Wood</option><option value="Stone">Stone</option><option value="Metal">Sheet metal</option><option value="TopTier">Armored</option>
+                            </select>
+                        </label>
+                        <label class="check wide"><input type="checkbox" checked="@_config.NeonSigns" @onchange="e => { _config.NeonSigns = e.Value is true; _dirty = true; }" /><span><b>Neon signs on the strip mall</b><small>A lit sign with the shop's name over each door (built-in shops only).</small></span></label>
+                        <label class="check wide"><input type="checkbox" checked="@_config.MapMarkers" @onchange="e => { _config.MapMarkers = e.Value is true; _dirty = true; }" /><span><b>Show the stores on the map</b><small>A shop icon with the store's name on hover.</small></span></label>
+                        <label class="check wide"><input type="checkbox" checked="@_config.ResetOnWipe" @onchange="e => { _config.ResetOnWipe = e.Value is true; _dirty = true; }" /><span><b>Reset balances on map wipe</b><small>Everyone goes back to the starting credits.</small></span></label>
+                    </div>
+                </section>
+            }
+        }
+    </div>
+
+    <ItemGallery Visible="_gallery" VisibleChanged="v => _gallery = v" ServerId="@Id" Items="@_items" Title="Add an item to the shop" OnPick="AddItem" />
+
+    <ConfirmDialog Visible="@(_removeShop is not null)" VisibleChanged="v => { if (!v) _removeShop = null; }" Title="Remove this shop?" ConfirmText="Remove" Danger="true" OnConfirm="RemoveShop">
+        <p>@_removeShop?.Name and its items go away when you save. Its shopkeepers stay in the data file but won't appear until a shop with the same id exists again.</p>
+    </ConfirmDialog>
+}
+
+@code {
+    private bool _busy, _loaded, _dirty, _gallery;
+    private string _tab = "overview";
+    private StoreStatus? _status;
+    private StoreConfig? _config;
+    private StoreShop? _shop, _removeShop;
+    private string? _configError;
+    private long _amount = 100;
+    private List<RustItem> _items = new();
+    private Dictionary<string, RustItem> _byShort = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override Task OnServerChangedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (Server is null) return;
+        _busy = true;
+        try
+        {
+            var shopId = _shop?.Id;
+            _status = await StoreApi.StatusAsync(Id);
+            (_config, _configError) = await StoreService.ReadConfigAsync(Server);
+            _shop = _config?.Shops.FirstOrDefault(s => s.Id == shopId) ?? _config?.Shops.FirstOrDefault();
+            if (_items.Count == 0)
+            {
+                (_items, _) = await Tweaks.GetItemsAsync(Server);
+                _byShort = _items.GroupBy(i => i.Short, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            }
+            _dirty = false;
+            _loaded = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private string NameOf(string shortname) => _byShort.TryGetValue(shortname, out var i) ? i.Name : shortname;
+
+    private string ShopName(string id) => _config?.Shops.FirstOrDefault(s => s.Id == id)?.Name ?? id;
+
+    private static string Why(string key) => key switch
+    {
+        "kill" => "kills",
+        "gather" => "gathering",
+        "farm" => "farming",
+        "pickup" => "foraging",
+        "fish" => "fishing",
+        "keycard" => "keycards",
+        "pay" => "payments",
+        "admin" => "gifts",
+        _ => key,
+    };
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "buy" => "Bought at",
+        "pay" => "Paid",
+        "admin-give" => "Given by an admin",
+        "admin-take" => "Taken by an admin",
+        "admin-set" => "Set by an admin",
+        _ => kind,
+    };
+
+    private static string D(double v) => v.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static double Dbl(ChangeEventArgs e, double fallback) =>
+        double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : fallback;
+
+    private static int Int(ChangeEventArgs e, int fallback) =>
+        int.TryParse(e.Value?.ToString(), out var v) && v >= 0 ? v : fallback;
+
+    private void AddItem(string shortname)
+    {
+        if (_shop is null || string.IsNullOrWhiteSpace(shortname)) return;
+        var category = _shop.Items.LastOrDefault()?.Category ?? "";
+        _shop.Items.Add(new StoreItem { Item = shortname, Amount = 1, Price = 50, Category = category });
+        _dirty = true;
+    }
+
+    private void Move(StoreShop shop, int index, int by)
+    {
+        var to = index + by;
+        if (to < 0 || to >= shop.Items.Count) return;
+        (shop.Items[index], shop.Items[to]) = (shop.Items[to], shop.Items[index]);
+        _dirty = true;
+    }
+
+    private void AddShop()
+    {
+        if (_config is null) return;
+        var n = 1;
+        while (_config.Shops.Any(s => s.Id == "shop" + n)) n++;
+        _shop = new StoreShop { Id = "shop" + n, Name = "New shop", Keeper = "Shopkeeper" };
+        _config.Shops.Add(_shop);
+        _dirty = true;
+    }
+
+    private void RemoveShop()
+    {
+        if (_config is null || _removeShop is null) return;
+        _config.Shops.Remove(_removeShop);
+        _shop = _config.Shops.FirstOrDefault();
+        _removeShop = null;
+        _dirty = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Server is null || _config is null) return;
+        var ids = _config.Shops.GroupBy(s => s.Id).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (ids.Count > 0) { Toasts.Error($"Two shops have the id {ids[0]}. Give each shop its own id."); return; }
+        _busy = true;
+        try
+        {
+            var err = await StoreApi.SaveConfigAsync(Server, _config);
+            if (err is not null) { Toasts.Error(err); return; }
+            Toasts.Success(Runtime.IsOnline ? "Saved. The stores have the new prices." : "Saved. It applies the next time the server starts.");
+        }
+        finally { _busy = false; }
+        await LoadAsync();
+    }
+
+    private async Task CreditsAsync(StorePlayer p, string kind)
+    {
+        _busy = true;
+        try
+        {
+            var reply = await StoreApi.CreditsAsync(Id, kind, p.Id, Math.Max(0, _amount));
+            if (reply is null) { Toasts.Error("The server didn't answer."); return; }
+            Toasts.Show(reply.Trim());
+            _status = await StoreApi.StatusAsync(Id);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveMallAsync(StoreMall m)
+    {
+        _busy = true;
+        try
+        {
+            var reply = await StoreApi.RemoveMallAsync(Id, m.Id);
+            Toasts.Show(reply?.Trim() ?? "The server didn't answer.");
+            _status = await StoreApi.StatusAsync(Id);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RespawnAsync()
+    {
+        _busy = true;
+        try
+        {
+            var reply = await StoreApi.RespawnAsync(Id);
+            Toasts.Show(reply?.Trim() ?? "The server didn't answer.");
+            _status = await StoreApi.StatusAsync(Id);
+        }
+        finally { _busy = false; }
+    }
+}

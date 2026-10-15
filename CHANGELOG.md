@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0 (2026-10-15)
+
+### New
+- **Store** page and `RustSandboxStore` plugin 1.4.0: a Rust Credits (RC) currency. Players earn RC from kills (players, NPCs, animals), gathering, chopping wood, mining, farming, fishing and keycard puzzles. They spend it at NPC shopkeepers: press E on one to open a paged shop, click items into a cart, then Checkout. There are four shops: Guns N Ammo (guns, ammo and melee weapons), Clothes Shop, Hardware Store and Farmers Market. Players type `/credits` for their balance and where the shops are, and `/credits pay` sends credits to a friend. The Store page sets the items, prices, categories, earn rates, cooldowns and starting balance.
+- **Strip mall** (`/store build`): builds a wooden row of shops in front of you, with a shopkeeper in each. Guns hang on wall racks, clothes are on mannequins, there are floor displays, and ceiling and wall lights come on at night. The Farmers Market is an open-air stall with ripe crops in planters and food on lantern-lit tables. Players can't break, loot or build onto any of it. Taking a gun from a rack or food from a stall opens the shop with that item in the cart. Each shop has a lit neon sign. You set the sign pictures on the Store page (write a sign or upload a picture), not in game. `/store unbuild` removes the mall, and `/store rebuild` refreshes the displays after you change them. You can also place single shopkeepers with `/store add <shop|all>`. One placed inside a monument such as Outpost comes back at the same spot after a wipe.
+  - **Where to build it:** find a flat, open stretch of ground with lots of room. All four shops need about 40 m across and 16 m deep in front of you, clear of trees, rocks, water and anyone's base. On sloping ground the shops stand on stilts, and the build is refused if the ground drops more than 2.5 m across it.
+- In-game `/help` (Help 1.3.0) has a Store page for players and the store admin commands.
+
+### Fixed
+- **Join game** on the server card did nothing for Rust. It used a `steam://connect` link, which Rust doesn't answer. It now starts Rust through Steam with `+client.connect` to the server. Close Rust first: Steam can't hand the address to a game that's already running.
+- NPCs 1.2.1: scientists only shot you from point-blank range. Further away they kept raising and lowering their weapon. Rust only lets an NPC fire inside its gun's engagement range, which is about 30 m for pistols and shotguns. A new `EngageRange` setting in the plugin config (45 m by default) sets how far scientists notice and shoot at players.
+- NPCs 1.2.2: a wild camp saved on a spot NPCs can't walk on never spawned, and the log said "Can't find walkable ground for Camp at …" on every restart. A camp that keeps failing now moves to a new spot.
+
 ## 1.3.0 (2026-10-14)
 
 ### New

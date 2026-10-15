@@ -624,6 +624,61 @@
     }
   }
 
+  // ------------------------------------------------------------------ neon sign builder (Store page)
+  // Black is unlit on a Rust neon sign, so pictures are drawn on black. Results come back to .NET as PNG bytes.
+  function neonCanvas(canvas) {
+    canvas.width = 512; canvas.height = 256;
+    const x = canvas.getContext("2d");
+    x.fillStyle = "#000"; x.fillRect(0, 0, 512, 256);
+    return x;
+  }
+  function pngBytes(canvas) {
+    return new Promise(res => canvas.toBlob(b => b.arrayBuffer().then(a => res(new Uint8Array(a))), "image/png"));
+  }
+  function lighter(hex) {
+    const n = parseInt((hex || "#ffffff").slice(1), 16);
+    const mix = c => Math.round(c + (255 - c) * 0.6);
+    return `rgb(${mix(n >> 16 & 255)},${mix(n >> 8 & 255)},${mix(n & 255)})`;
+  }
+  function drawNeon(canvas, o) {
+    const W = 512, H = 256, x = neonCanvas(canvas);
+    const lines = [[o.line1, o.color], [o.line2, o.color2 || o.color]].filter(l => (l[0] || "").trim().length);
+    const font = s => `900 ${s}px "Arial Black", "Segoe UI Black", Impact, sans-serif`;
+    let size = lines.length > 1 ? 96 : 120;
+    x.font = font(size);
+    while (size > 20 && Math.max(0, ...lines.map(l => x.measureText(l[0].trim()).width)) > W - 70) x.font = font(size -= 4);
+    const lh = size * 1.02, y0 = H / 2 - (lines.length - 1) * lh / 2;
+    x.textAlign = "center"; x.textBaseline = "middle"; x.lineJoin = "round";
+    const tube = (col, draw) => {
+      // glow, tube, bright core
+      for (const [blur, width, stroke] of [[28, 7, col], [12, 5, col], [4, 2, lighter(col)]]) {
+        x.save(); x.shadowColor = col; x.shadowBlur = blur; x.strokeStyle = stroke; x.lineWidth = width; draw(); x.restore();
+      }
+    };
+    lines.forEach((l, i) => tube(l[1], () => x.strokeText(l[0].trim(), W / 2, y0 + i * lh + size * 0.04)));
+    if (o.border) tube(o.color, () => { x.beginPath(); x.roundRect(14, 14, W - 28, H - 28, 26); x.stroke(); });
+    return pngBytes(canvas);
+  }
+  // Shows a picture (base64 PNG/JPG) fitted onto the black sign; returns it as PNG bytes, or null if it isn't an image.
+  function loadNeon(canvas, b64) {
+    return new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        const x = neonCanvas(canvas), s = Math.min(512 / img.width, 256 / img.height);
+        const w = img.width * s, h = img.height * s;
+        x.drawImage(img, (512 - w) / 2, (256 - h) / 2, w, h);
+        pngBytes(canvas).then(res);
+      };
+      img.onerror = () => res(null);
+      img.src = "data:image/png;base64," + b64;
+    });
+  }
+  function neonPlaceholder(canvas, text) {
+    const x = neonCanvas(canvas);
+    x.fillStyle = "#777"; x.font = "600 22px sans-serif"; x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText(text, 256, 128);
+  }
+
   window.RSM = {
     mapgen: {
       render: (canvas, seed, size, opts) => renderMap(canvas, seed, size, opts),
@@ -644,6 +699,7 @@
         el.focus();
       },
     },
+    neon: { draw: drawNeon, load: loadNeon, placeholder: neonPlaceholder },
     focus: el => { if (el) el.focus(); },
     copy: text => navigator.clipboard.writeText(text),
     registerHotkeys: ref => { hotkeyRef = ref; document.removeEventListener("keydown", onKey); document.addEventListener("keydown", onKey); },

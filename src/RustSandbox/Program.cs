@@ -92,6 +92,7 @@ builder.Services.AddSingleton<QuestsService>();
 builder.Services.AddSingleton<LootService>();
 builder.Services.AddSingleton<WeatherService>();
 builder.Services.AddSingleton<NpcsService>();
+builder.Services.AddSingleton<StoreService>();
 builder.Services.AddSingleton<EventsService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerMonitorService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SchedulerService>());
@@ -177,7 +178,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok", time = DateTime.
 app.MapGet("/api/plugin", () =>
     Results.File(Encoding.UTF8.GetBytes(ProcessManager.ReadPluginSource()), "text/plain", ProcessManager.PluginFileName));
 
-foreach (var bundled in new[] { BundledPlugin.EventHud, BundledPlugin.Skills, BundledPlugin.Daily, BundledPlugin.Events, BundledPlugin.Quests, BundledPlugin.Help, BundledPlugin.Recycler, BundledPlugin.Skins, BundledPlugin.Loot, BundledPlugin.Pet, BundledPlugin.Weather, BundledPlugin.Npcs })
+foreach (var bundled in new[] { BundledPlugin.EventHud, BundledPlugin.Skills, BundledPlugin.Daily, BundledPlugin.Events, BundledPlugin.Quests, BundledPlugin.Help, BundledPlugin.Recycler, BundledPlugin.Skins, BundledPlugin.Loot, BundledPlugin.Pet, BundledPlugin.Weather, BundledPlugin.Npcs, BundledPlugin.Store })
     app.MapGet(bundled.DownloadPath, () => Results.File(Encoding.UTF8.GetBytes(bundled.ReadSource()), "text/plain", bundled.FileName));
 
 app.MapGet("/api/servers/{id:int}/plugin-config", async (int id, ServerService servers, HttpRequest req, IConfiguration cfg) =>

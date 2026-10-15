@@ -43,8 +43,11 @@ public sealed record BundledPlugin(string PluginName, string Label, string Downl
     /// <summary>Easy NPC spawns: presets with built-in gear at monuments, picked places, road patrols and wild camps.</summary>
     public static readonly BundledPlugin Npcs = new("RustSandboxNpcs", "NPCs plugin", "/api/plugin/npcs");
 
+    /// <summary>Rust Credits earned in play and spent at NPC shopkeepers (paged store, cart and checkout).</summary>
+    public static readonly BundledPlugin Store = new("RustSandboxStore", "Store plugin", "/api/plugin/store");
+
     public static readonly IReadOnlyList<BundledPlugin> All =
-        new[] { EventHud, Skills, Daily, Events, Quests, Help, Recycler, Skins, Loot, Pet, Weather, Npcs };
+        new[] { EventHud, Skills, Daily, Events, Quests, Help, Recycler, Skins, Loot, Pet, Weather, Npcs, Store };
 
     public static BundledPlugin? Find(string pluginName) =>
         All.FirstOrDefault(b => b.PluginName.Equals(pluginName, StringComparison.OrdinalIgnoreCase));

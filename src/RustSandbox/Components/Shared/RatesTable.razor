@@ -1,0 +1,50 @@
+@* Editable name → number list (Store earning rates by prefab, resource or keycard colour). *@
+@using System.Globalization
+<table class="table" style="max-width:520px">
+    <tbody>
+        @foreach (var key in Values.Keys.OrderBy(k => k).ToList())
+        {
+            var k = key;
+            <tr>
+                <td>@k</td>
+                <td class="num"><input class="input" type="number" step="0.1" min="0" style="width:7rem" value="@Values[k].ToString("0.##", CultureInfo.InvariantCulture)" @onchange="e => Set(k, e)" /></td>
+                <td><button class="btn sm ghost" title="Remove" @onclick="() => Remove(k)"><Icon Name="trash" /></button></td>
+            </tr>
+        }
+        <tr>
+            <td><input class="input" style="width:12rem" placeholder="@Placeholder" @bind="_newKey" /></td>
+            <td class="num"><input class="input" type="number" step="0.1" min="0" style="width:7rem" @bind="_newValue" /></td>
+            <td><button class="btn sm" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_newKey)"><Icon Name="plus" /> Add</button></td>
+        </tr>
+    </tbody>
+</table>
+
+@code {
+    [Parameter] public Dictionary<string, double> Values { get; set; } = new();
+    [Parameter] public string Placeholder { get; set; } = "";
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private string _newKey = "";
+    private double _newValue = 1;
+
+    private async Task Set(string key, ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) && v >= 0) Values[key] = v;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Remove(string key)
+    {
+        Values.Remove(key);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Add()
+    {
+        var key = _newKey.Trim().ToLowerInvariant();
+        if (key.Length == 0) return;
+        Values[key] = Math.Max(0, _newValue);
+        _newKey = "";
+        await OnChanged.InvokeAsync();
+    }
+}

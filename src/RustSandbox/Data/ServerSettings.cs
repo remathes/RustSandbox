@@ -131,8 +131,8 @@ public class ServerSettings
         }
     }
 
-    /// <summary>Steam link that launches Rust and joins the server.</summary>
-    public string? SteamConnectUrl => ConnectAddress is { } a ? $"steam://connect/{a}" : null;
+    /// <summary>Steam link that launches Rust with +client.connect. steam://connect only works when the game port answers Steam queries, which Rust's does not.</summary>
+    public string? SteamConnectUrl => ConnectAddress is { } a ? $"steam://run/252490//+client.connect%20{a}/" : null;
 
     public string RustMapsUrl => $"https://rustmaps.com/map/{WorldSize}_{Seed}";
 

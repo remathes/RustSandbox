@@ -369,6 +369,31 @@
 
         <section class="panel mt">
             <div class="panel-head">
+                <h2>Store</h2>
+                <span class="spacer"></span>
+                @if (_storeLoaded == true)
+                {
+                    <span class="badge good">Loaded</span>
+                }
+                else if (_storeLoaded == false)
+                {
+                    <span class="badge">Not installed</span>
+                }
+            </div>
+            <div class="panel-body">
+                <p style="margin-top:0">Rust Credits earned for kills, gathering, farming, fishing and keycard puzzles, spent at shopkeepers you place in the world (Guns &amp; Ammo, Clothes, Hardware and the Farmers Market). Admins type <code>/store build</code> in game for a strip mall with all four shops (stand on flat, open ground with lots of room, about 40 × 16 m), or <code>/store add all</code> for just the shopkeepers; prices and earning rates are on the <a href="s/@Id/store">Store page</a>. Players type <code>/credits</code>.</p>
+                <div class="row">
+                    @if (BundledPlugin.Store.CannotInstallReason(Server) is null)
+                    {
+                        <button class="btn primary" @onclick="InstallStoreAsync" disabled="@_busy"><Icon Name="bolt" /> @(BundledPlugin.Store.IsInstalled(Server) ? "Update on this server" : "Install on this server")</button>
+                    }
+                    <a class="btn" href="@BundledPlugin.Store.DownloadPath" download><Icon Name="download" /> @BundledPlugin.Store.FileName</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel mt">
+            <div class="panel-head">
                 <h2>Weather</h2>
                 <span class="spacer"></span>
                 @if (_weatherLoaded == true)
@@ -452,7 +477,7 @@
 
 @code {
     private string _publicUrl = "";
-    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded, _recyclerLoaded, _skinsLoaded, _lootLoaded, _petLoaded, _weatherLoaded, _npcsLoaded;
+    private bool? _pluginLoaded, _hudLoaded, _skillsLoaded, _dailyLoaded, _eventsLoaded, _questsLoaded, _helpLoaded, _recyclerLoaded, _skinsLoaded, _lootLoaded, _petLoaded, _weatherLoaded, _npcsLoaded, _storeLoaded;
     private bool _showKey, _busy, _regenOpen;
 
     protected override async Task OnServerChangedAsync()
@@ -465,7 +490,7 @@
 
     private async Task CheckPluginAsync()
     {
-        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = _recyclerLoaded = _skinsLoaded = _lootLoaded = _petLoaded = _weatherLoaded = _npcsLoaded = null;
+        _pluginLoaded = _hudLoaded = _skillsLoaded = _dailyLoaded = _eventsLoaded = _questsLoaded = _helpLoaded = _recyclerLoaded = _skinsLoaded = _lootLoaded = _petLoaded = _weatherLoaded = _npcsLoaded = _storeLoaded = null;
         if (Server is null || !Runtime.IsOnline) return;
         var list = await Connections.QueryAsync(Id, PluginService.Prefix(Server.Settings) + "plugins", TimeSpan.FromSeconds(8));
         _pluginLoaded = list is null ? null : list.Contains("RustSandboxTelemetry", StringComparison.OrdinalIgnoreCase);
@@ -481,6 +506,7 @@
         _petLoaded = list is null ? null : list.Contains(BundledPlugin.Pet.PluginName, StringComparison.OrdinalIgnoreCase);
         _weatherLoaded = list is null ? null : list.Contains(BundledPlugin.Weather.PluginName, StringComparison.OrdinalIgnoreCase);
         _npcsLoaded = list is null ? null : list.Contains(BundledPlugin.Npcs.PluginName, StringComparison.OrdinalIgnoreCase);
+        _storeLoaded = list is null ? null : list.Contains(BundledPlugin.Store.PluginName, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task ReloadPluginAsync()
@@ -540,6 +566,7 @@
     private Task InstallHelpAsync() => InstallBundledAsync(BundledPlugin.Help, "Help plugin installed. Players type /help in game.");
     private Task InstallSkinsAsync() => InstallBundledAsync(BundledPlugin.Skins, "Skins plugin installed. Players type /skins in game.");
     private Task InstallNpcsAsync() => InstallBundledAsync(BundledPlugin.Npcs, "NPCs plugin installed. Add NPCs on the NPCs page.");
+    private Task InstallStoreAsync() => InstallBundledAsync(BundledPlugin.Store, "Store plugin installed. Place shopkeepers in game with /store add all, and set prices on the Store page.");
     private Task InstallWeatherAsync() => InstallBundledAsync(BundledPlugin.Weather, "Weather plugin installed. Set the weather mix on the Weather page.");
     private Task InstallPetAsync() => InstallBundledAsync(BundledPlugin.Pet, "Pet plugin installed. Players type /pet in game.");
     private Task InstallLootAsync() => InstallBundledAsync(BundledPlugin.Loot, "Loot plugin installed. Set up crates on the Loot page.");

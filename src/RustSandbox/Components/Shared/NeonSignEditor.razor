@@ -1,0 +1,107 @@
+@* Builds a shop's neon sign picture: neon text drawn in the browser, or an uploaded picture. Saved as base64 PNG in StoreShop.Sign. *@
+@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Components.Forms
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;align-items:start">
+    <div>
+        <canvas @ref="_canvas" width="512" height="256" style="width:100%;max-width:512px;aspect-ratio:2/1;border-radius:10px;background:#000;display:block"></canvas>
+        <small class="muted">@(string.IsNullOrEmpty(Shop.Sign) ? "Using the built-in sign." : "Custom sign. Black parts stay unlit in game.")</small>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+        <label class="field"><span>Top line</span><input class="input" maxlength="24" @bind="_line1" @bind:event="oninput" /></label>
+        <label class="field"><span>Bottom line</span><input class="input" maxlength="24" @bind="_line2" @bind:event="oninput" /></label>
+        <div class="row">
+            <label class="field"><span>Colour</span><input class="input" type="color" @bind="_color" style="width:5rem;padding:2px" /></label>
+            <label class="field"><span>Bottom line colour</span><input class="input" type="color" @bind="_color2" style="width:5rem;padding:2px" /></label>
+            <label class="check" style="margin-top:1.4rem"><input type="checkbox" @bind="_border" /><span><b>Border</b></span></label>
+        </div>
+        <div class="row">
+            <button class="btn primary" @onclick="DrawAsync" disabled="@(string.IsNullOrWhiteSpace(_line1) && string.IsNullOrWhiteSpace(_line2))">Make sign</button>
+            <label class="btn">
+                Upload picture
+                <InputFile OnChange="UploadAsync" accept=".png,.jpg,.jpeg" style="display:none" />
+            </label>
+            @if (!string.IsNullOrEmpty(Shop.Sign))
+            {
+                <button class="btn ghost" @onclick="BuiltInAsync">Use built-in</button>
+            }
+        </div>
+        @if (_error is not null)
+        {
+            <div class="callout warn">@_error</div>
+        }
+        <small class="muted">Save, then the plugin reloads and the strip mall's sign changes. Players can't paint these signs in game.</small>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public StoreShop Shop { get; set; } = default!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private ElementReference _canvas;
+    private string _line1 = "", _line2 = "", _color = "#ff3c32", _color2 = "#ff3c32";
+    private bool _border = true;
+    private string? _error, _forShop;
+    private bool _redraw;
+
+    protected override void OnParametersSet()
+    {
+        if (_forShop == Shop.Id) return;
+        _forShop = Shop.Id;
+        var words = (Shop.Name ?? "").ToUpperInvariant().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        _line1 = words.ElementAtOrDefault(0) ?? "";
+        _line2 = words.ElementAtOrDefault(1) ?? "";
+        _color = _color2 = StoreService.ToHex(Shop.Color);
+        _error = null;
+        _redraw = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_redraw) return;
+        _redraw = false;
+        if (string.IsNullOrEmpty(Shop.Sign)) await JS.InvokeVoidAsync("RSM.neon.placeholder", _canvas, "Built-in sign");
+        else
+        {
+            var shown = await JS.InvokeAsync<IJSStreamReference?>("RSM.neon.load", _canvas, Shop.Sign);
+            if (shown is not null) await shown.DisposeAsync();
+        }
+    }
+
+    private async Task DrawAsync()
+    {
+        _error = null;
+        var png = await JS.InvokeAsync<IJSStreamReference>("RSM.neon.draw", _canvas, new { line1 = _line1, line2 = _line2, color = _color, color2 = _color2, border = _border });
+        await SetAsync(png);
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        if (e.File.Size > 4 * 1024 * 1024) { _error = "That picture is over 4 MB. Pick a smaller one."; return; }
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(4 * 1024 * 1024).CopyToAsync(ms);
+        var png = await JS.InvokeAsync<IJSStreamReference?>("RSM.neon.load", _canvas, Convert.ToBase64String(ms.ToArray()));
+        if (png is null) { _error = "That file isn't a picture the browser can read. Use a PNG or JPG."; return; }
+        await SetAsync(png);
+    }
+
+    private async Task SetAsync(IJSStreamReference png)
+    {
+        await using (png)
+        {
+            await using var stream = await png.OpenReadStreamAsync(4 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            Shop.Sign = Convert.ToBase64String(ms.ToArray());
+        }
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task BuiltInAsync()
+    {
+        Shop.Sign = null;
+        _redraw = true;
+        await OnChanged.InvokeAsync();
+    }
+}

@@ -20,7 +20,7 @@ using UnityEngine.AI;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox NPCs", "RustSandbox", "1.1.1")]
+    [Info("Rust Sandbox NPCs", "RustSandbox", "1.2.2")]
     [Description("Easy NPC spawns: presets with built-in gear at monuments, places you pick, road patrols and wild camps.")]
     public class RustSandboxNpcs : RustPlugin
     {
@@ -94,6 +94,9 @@ namespace Oxide.Plugins
             [JsonProperty("Enabled")] public bool Enabled = true;
             /// <summary>Easy, Normal or Hard: scales every NPC's health, aim and damage together.</summary>
             [JsonProperty("Difficulty")] public string Difficulty = "Normal";
+            // How far (metres) scientists notice players and shoot from. Rust's own range is the gun's short
+            // "effective range", so out of it they just crouch and stand in combat without firing.
+            [JsonProperty("EngageRange")] public float EngageRange = 45f;
             [JsonProperty("Presets", ObjectCreationHandling = ObjectCreationHandling.Replace)] public Dictionary<string, Preset> Presets = DefaultPresets();
             [JsonProperty("Spots", ObjectCreationHandling = ObjectCreationHandling.Replace)] public List<Spot> Spots = new List<Spot>();
             [JsonProperty("Roads")] public RoadSettings Roads = new RoadSettings();
@@ -275,6 +278,7 @@ namespace Oxide.Plugins
             CheckServerSettings();
             // Give Rust a moment to finish its navmesh before the first NPCs go down.
             _readyAt = Time.realtimeSinceStartup + 15f;
+            _diagUntil = Time.realtimeSinceStartup + 1200f;
             Build();
             _tick = timer.Every(2f, Tick);
         }
@@ -436,6 +440,27 @@ namespace Oxide.Plugins
                 found.Add(p);
             }
             return found;
+        }
+
+        // A saved camp spot NPCs can't stand on (picked before the navmesh was ready, or the map changed) moves to a new one.
+        private bool MoveCamp(Group g)
+        {
+            var others = _groups.Where(o => o != g && o.Kind == "camp").Select(o => o.Home).ToList();
+            var spot = FindCampSpots(1, others);
+            if (spot.Count == 0) return false;
+            var old = g.Label;
+            var p = spot[0];
+            var key = Vec(g.Home);
+            var i = _camps.Points.IndexOf(key);
+            if (i >= 0) _camps.Points[i] = Vec(p); else _camps.Points.Add(Vec(p));
+            Interface.Oxide.DataFileSystem.WriteObject(Name + "_camps", _camps);
+            g.Home = p;
+            g.Label = "Camp at " + Grid(p);
+            g.Failures = 0;
+            g.NextTry = 0f;
+            if (g.Prop != null && !g.Prop.IsDestroyed) { g.Prop.Kill(); g.Prop = SpawnCampfire(p); }
+            Puts($"{old} had no walkable ground, moved it to {Grid(p)}.");
+            return true;
         }
 
         private BaseEntity SpawnCampfire(Vector3 p)
@@ -673,6 +698,60 @@ namespace Oxide.Plugins
                 npc.Brain.Events?.Memory?.Position.Set(g.Home, 4);
             }
             catch (Exception ex) { Warn("NPC setup failed: " + ex.Message); }
+            timer.Once(0.5f, () => SetRange(npc));
+        }
+
+        private bool _rangeLogged;
+        private float _diagUntil;
+        private readonly Dictionary<ulong, float> _diagNext = new Dictionary<ulong, float>();
+
+        // For 20 minutes after loading, what each scientist with a player target is doing goes to the log, so a
+        // fight that goes wrong (not shooting from range) can be read back afterwards.
+        private void Diagnose(Group g)
+        {
+            foreach (var e in g.Alive)
+            {
+                var npc = e as HumanNPC;
+                if (npc == null || npc.IsDestroyed || npc.Brain == null || npc.net == null) continue;
+                try
+                {
+                    var brain = npc.Brain;
+                    var target = brain.Events?.Memory?.Entity.Get(brain.Events.CurrentInputMemorySlot) as BasePlayer;
+                    if (target == null || target.IsNpc) continue;
+                    float next;
+                    var id = npc.net.ID.Value;
+                    if (_diagNext.TryGetValue(id, out next) && Time.realtimeSinceStartup < next) continue;
+                    _diagNext[id] = Time.realtimeSinceStartup + 4f;
+                    var dir = (target.CenterPoint() - npc.eyes.position).normalized;
+                    var gun = npc.GetAttackEntity() as BaseProjectile;
+                    var agent = brain.Navigator?.Agent;
+                    Puts($"[fight] {npc.displayName} {Grid(npc.transform.position)} state={brain.CurrentState?.StateType} " +
+                         $"dist={Vector3.Distance(npc.transform.position, target.transform.position):0.0} engage={npc.EngagementRange():0} " +
+                         $"los={brain.Senses.Memory.IsLOS(target)} facing={Vector3.Dot(npc.eyes.BodyForward(), dir):0.00} aimed={npc.targetAimedDuration:0.0} " +
+                         $"held={npc.GetHeldEntity()?.ShortPrefabName ?? "none"} ammo={(gun != null ? gun.primaryMagazine.contents.ToString() : "-")} " +
+                         $"navmesh={(agent != null && agent.enabled ? agent.isOnNavMesh.ToString() : "off")} moving={brain.Navigator?.Moving} " +
+                         $"faceOverride={brain.Navigator?.IsOverridingFacingDirection} ducked={npc.modelState?.ducked}");
+                }
+                catch (Exception ex) { Warn("Fight log failed: " + ex.Message); }
+            }
+        }
+
+        // Rust only lets a scientist fire within its gun's engagement range (effective range x 2 x the brain's
+        // multiplier). For player guns that is short, so from further off they sit in combat ducking up and down.
+        private void SetRange(HumanNPC npc)
+        {
+            if (npc == null || npc.IsDestroyed || npc.Brain == null) return;
+            var brain = npc.Brain;
+            var want = Mathf.Clamp(_config.EngageRange, 5f, 150f);
+            var before = npc.EngagementRange();
+            if (before > 0.1f && before < want) brain.AttackRangeMultiplier *= want / before;
+            if (brain.SenseRange < want) brain.SenseRange = want;
+            if (brain.TargetLostRange < want * 1.5f) brain.TargetLostRange = want * 1.5f;
+            if (!_rangeLogged)
+            {
+                _rangeLogged = true;
+                Puts($"Scientists engage at {npc.EngagementRange():0} m (Rust gave {before:0} m with {npc.GetAttackEntity()?.ShortPrefabName ?? "no weapon"}), notice players at {brain.SenseRange:0} m.");
+            }
         }
 
         private BaseCombatEntity SpawnAnimal(Group g, Vector3 pos, Quaternion rot)
@@ -730,12 +809,14 @@ namespace Oxide.Plugins
                     {
                         g.Failures++;
                         g.NextTry = now + Mathf.Min(300f, 5f * g.Failures);
+                        if (g.Kind == "camp" && g.Failures >= 3 && g.Alive.Count == 0 && NavReady && MoveCamp(g)) continue;
                         if (g.Failures == 10) Warn($"Can't find walkable ground for {g.Label} ({Grid(g.Home)}). Try a bigger radius or another spot.");
                     }
                 }
 
                 if (g.Road != null) MoveAlongRoad(g, now);
                 Wander(g);
+                if (now < _diagUntil) Diagnose(g);
             }
         }
 

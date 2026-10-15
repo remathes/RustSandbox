@@ -18,7 +18,7 @@ using UnityEngine.UI;
 
 namespace Oxide.Plugins
 {
-    [Info("Rust Sandbox Help", "RustSandbox", "1.2.6")]
+    [Info("Rust Sandbox Help", "RustSandbox", "1.3.0")]
     [Description("A /help server guide listing the commands of every Rust Sandbox system, shown to new players.")]
     public class RustSandboxHelp : RustPlugin
     {
@@ -123,6 +123,17 @@ namespace Oxide.Plugins
             },
             new Section
             {
+                Title = "Store",
+                Plugin = "RustSandboxStore",
+                Intro = "You earn Rust Credits (RC) for kills, chopping wood, mining, farming, fishing and keycard puzzles. Spend them at the shopkeepers: Guns N Ammo, the Clothes Shop, the Hardware store and the Farmers Market. Press E on a shopkeeper, click items to add them to your cart, then Checkout. Stores show on the map.",
+                Commands =
+                {
+                    C("/credits", "Your balance and where the stores are (also /rc or /balance)"),
+                    C("/credits pay <player> <amount>", "Send credits to another player"),
+                },
+            },
+            new Section
+            {
                 Title = "Weather",
                 Plugin = "RustSandboxWeather",
                 Intro = "The weather changes on its own: clear skies, overcast, fog, rain, storms and dusty haze, fading from one to the next. You'll get a chat line when it starts to turn. Check the forecast any time.",
@@ -213,6 +224,10 @@ namespace Oxide.Plugins
                     C("/npcs remove", "Remove the nearest NPC spot (/npcs list shows them)"),
                     C("/npcs list", "Every NPC group with its grid; /npcs go <number> teleports you there"),
                     C("/npcs show", "Mark the NPCs near you on screen"),
+                    C("/store build", "Build a wooden strip mall of all the shops in front of you. Pick flat, open ground with lots of room, about 40 x 16 m (/store unbuild removes it)"),
+                    C("/store add <shop|all>", "Place a shopkeeper where you stand (guns, clothes, hardware, farmers, or all four in a row)"),
+                    C("/store remove", "Remove the shopkeeper next to you (/store list, /store move <id>, /store outfit <id>)"),
+                    C("/credits give <player> <amount>", "Give credits (also take or set)"),
                 },
             },
         };
